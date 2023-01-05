@@ -7,6 +7,8 @@ import torch
 import wandb
 from tqdm.auto import tqdm
 
+from utils.unpacking import basic_unpack
+
 
 def set_random_seed(seed):
     torch.backends.cudnn.deterministic = True
@@ -21,13 +23,15 @@ def occurence_accuracy(pred, correct):
     return torch.argmax(pred, dim=1) == correct
 
 
-def train_one_epoch(model, train_dataloader, criterion, optimizer, device="cuda:0", verbose=False) -> float:
+def train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper, device="cuda:0",
+                    verbose=False) -> float:
     """
     Trains a model for a single run of the dataloader
     :param model: model to train
     :param train_dataloader: loader with training data
     :param criterion: loss criterion
     :param optimizer: weight optimizer
+    :param model_wrapper: wrapper to get a loss from the model
     :param device: computation device
     :param verbose: whether to print tqdm bar
     :return: mean loss across all batches
@@ -35,11 +39,9 @@ def train_one_epoch(model, train_dataloader, criterion, optimizer, device="cuda:
     model.train()
     losses = []
 
-    for pic, task, arg, res in tqdm(train_dataloader, disable=not verbose):
-        pic, task, arg, res = pic.to(device), task.to(device), arg.to(device), res.to(device)
+    for obj in tqdm(train_dataloader, disable=not verbose):
         optimizer.zero_grad()
-        prediction = model(pic, task, arg)
-        loss = criterion(prediction, res)
+        loss = model_wrapper(obj, device, model, criterion)
         losses.append(loss.item())
         loss.backward()
         optimizer.step()
@@ -72,9 +74,9 @@ def predict(model, val_dataloader, criterion, device="cuda:0", verbose=False) ->
     return np.array(losses), np.array(accuracies)
 
 
-def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, optimizer, device="cuda:0", n_epochs=10,
-          scheduler=None, verbose=False, check_dir=None, save_every=None, model_name="Model",
-          show_tqdm=False) -> (list[float], list[float], list[float]):
+def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, optimizer, model_wrapper=basic_unpack,
+          device="cuda:0", n_epochs=10, scheduler=None, verbose=False, check_dir=None, save_every=None,
+          model_name="Model", show_tqdm=False) -> (list[float], list[float], list[float]):
     """
     Train the model
     :param model: model to train
@@ -82,6 +84,7 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, o
     :param val_dataloader: loader with validation data
     :param test_dataloader: loader with testing data
     :param criterion: loss criterion
+    :param model_wrapper: wrapper function to get a single loss tensor from the model
     :param optimizer: weight optimizer
     :param device: computation device
     :param n_epochs: number of training epochs
@@ -103,7 +106,7 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, o
     if check_dir:
         Path(check_dir + f"/{model_name}").mkdir(parents=True, exist_ok=True)
     for epoch in range(n_epochs):
-        train_loss = train_one_epoch(model, train_dataloader, criterion, optimizer, device, show_tqdm)
+        train_loss = train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper, device, show_tqdm)
         val_losses, val_acc = predict(model, val_dataloader, criterion, device, show_tqdm)
         test_losses, test_acc = predict(model, test_dataloader, criterion, device, show_tqdm)
         val_loss = np.mean(val_losses).item()

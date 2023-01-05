@@ -57,7 +57,7 @@ class EmnistLeftRight(EmnistDataset):
         super().__init__(data_root, transform, size_limit)
         self.num_classes = num_classes
 
-    def __getitem__(self, item: int) -> (torch.Tensor, bool, int, int):
+    def __getitem__(self, item: int) -> (torch.Tensor, torch.Tensor, torch.Tensor, int):
         """
         :param item: item index
         :return: Transformed image, True if the task is right-of and False otherwise, Argument class as one-hot,
@@ -74,3 +74,29 @@ class EmnistLeftRight(EmnistDataset):
                 torch.tensor(labels[index]), self.num_classes).type(torch.FloatTensor), labels[index + 1]
         return self.transform(img), torch.tensor([0., 1.]), F.one_hot(
             torch.tensor(labels[index + 1]), self.num_classes).type(torch.FloatTensor), labels[index]
+
+
+class EmnistLRBoth(EmnistDataset):
+
+    def __init__(self, data_root, num_classes, transform, size_limit: Optional[int] = None):
+        super().__init__(data_root, transform, size_limit)
+        self.num_classes = num_classes
+
+    def __getitem__(self, item: int) -> (torch.Tensor, torch.Tensor, torch.Tensor, int,
+                                         torch.Tensor, torch.Tensor, int):
+        """
+        :param item: item index
+        :return: Transformed image, True if the task is right-of and False otherwise, Argument class as one-hot,
+                 Result class
+        """
+        path_stub = self.path_stubs[item]
+        img = Image.open(f"{path_stub}img.jpg")
+        with open(f"{path_stub}raw.pkl", 'rb') as f:
+            labels: list[int] = pickle.load(f).label_ordered[0]
+        # task_right_of = random.random() < 0.5
+        right_of_index = random.randint(0, 4)
+        left_of_index = random.randint(1, 5)
+        return self.transform(img), torch.tensor([1., 0.]), F.one_hot(
+            torch.tensor(labels[right_of_index]), self.num_classes).type(torch.FloatTensor), labels[
+            right_of_index + 1], torch.tensor([0., 1.]), F.one_hot(
+            torch.tensor(labels[left_of_index]), self.num_classes).type(torch.FloatTensor), labels[left_of_index - 1]

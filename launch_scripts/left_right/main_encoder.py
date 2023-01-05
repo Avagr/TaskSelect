@@ -7,11 +7,11 @@ from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
 from transformers import ViTConfig
 
-from datasets import EmnistLeftRight
-from modules import LeftRightEncoder
-from utils import set_random_seed, train
+from datasets.emnist import EmnistLeftRight
+from modules.left_right import LeftRightEncoder
+from utils.training import set_random_seed, train
 
-# os.environ["WANDB_MODE"] = "disabled"
+os.environ["WANDB_MODE"] = "disabled"
 
 run_config = {
     'lr': 3e-4,
