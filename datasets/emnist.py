@@ -93,10 +93,13 @@ class EmnistLRBoth(EmnistDataset):
         img = Image.open(f"{path_stub}img.jpg")
         with open(f"{path_stub}raw.pkl", 'rb') as f:
             labels: list[int] = pickle.load(f).label_ordered[0]
-        # task_right_of = random.random() < 0.5
         right_of_index = random.randint(0, 4)
         left_of_index = random.randint(1, 5)
-        return self.transform(img), torch.tensor([1., 0.]), F.one_hot(
-            torch.tensor(labels[right_of_index]), self.num_classes).type(torch.FloatTensor), labels[
-            right_of_index + 1], torch.tensor([0., 1.]), F.one_hot(
+        task_r, arg_r, res_r = torch.tensor([1., 0.]), F.one_hot(
+            torch.tensor(labels[right_of_index]),self.num_classes).type(torch.FloatTensor), labels[right_of_index + 1]
+        task_l, arg_l, res_l = torch.tensor([0., 1.]), F.one_hot(
             torch.tensor(labels[left_of_index]), self.num_classes).type(torch.FloatTensor), labels[left_of_index - 1]
+        if random.random() < 0.5:
+            return self.transform(img), task_r, arg_r, res_r, task_l, arg_l, res_l
+        else:
+            return self.transform(img), task_l, arg_l, res_l, task_r, arg_r, res_r

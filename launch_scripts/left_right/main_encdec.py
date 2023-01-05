@@ -1,11 +1,15 @@
 # coding: utf-8
-import os
 import torch
 import wandb
+import os
+from pathlib import Path
+import sys
 from torch import nn
 from torch.utils.data import DataLoader
 from torchvision.transforms import transforms
 from transformers import ViTConfig
+
+sys.path.insert(1, str(Path(__file__).parents[2]))
 
 from datasets.emnist import EmnistLeftRight
 from modules.left_right import LeftRightEncDec
