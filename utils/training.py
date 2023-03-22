@@ -19,6 +19,10 @@ def set_random_seed(seed):
     os.environ["PYTHONHASHSEED"] = str(seed)
 
 
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
 def occurence_accuracy(pred, correct):
     return torch.argmax(pred, dim=1) == correct
 

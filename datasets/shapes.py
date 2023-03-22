@@ -1,3 +1,4 @@
+import itertools
 import math
 import random
 from typing import Optional
@@ -9,6 +10,7 @@ from dataclasses import dataclass
 @dataclass()
 class Shape:
     margin: int = 5
+    color: str = None
 
     def intersects(self, shape: 'Shape'):
         a_1, a_2 = self.bounding_rect()
@@ -25,8 +27,15 @@ class Shape:
     def center(self) -> (int, int):
         raise NotImplementedError
 
+    def __str__(self):
+        return f"{type(self).__name__}: {self.color}"
 
-@dataclass()
+    @property
+    def name(self):
+        return type(self).__name__.lower()
+
+
+@dataclass(unsafe_hash=True)
 class Triangle(Shape):
     p1: (int, int) = None
     p2: (int, int) = None
@@ -58,7 +67,7 @@ class Triangle(Shape):
         return (self.p1[0] + self.p2[0] + self.p3[0]) / 3, (self.p1[1] + self.p2[1] + self.p3[1]) / 3
 
 
-@dataclass()
+@dataclass(unsafe_hash=True)
 class Square(Shape):
     top_left: (int, int) = None
     bottom_right: (int, int) = None
@@ -80,7 +89,7 @@ class Square(Shape):
         return (self.bottom_right[0] + self.top_left[0]) / 2, (self.bottom_right[1] + self.top_left[1]) / 2
 
 
-@dataclass()
+@dataclass(unsafe_hash=True)
 class Circle(Shape):
     center_point: (int, int) = None
     radius: int = None
@@ -129,10 +138,15 @@ class DatasetEntry:
 
 
 def generate_image(num_shapes: int, create_mask: bool, size: (int, int) = (224, 224),
-                   background=(255, 255, 255)) -> DatasetEntry:
-    chosen_shape_types = random.choices([Circle, Triangle, Square], k=num_shapes)
-    chosen_colors = random.choices(['red', 'green', 'blue'], k=num_shapes)
-    shapes = scatter_shapes(chosen_shape_types, size[0], size[1], 40)
+                   background=(255, 255, 255), combinations=None, scale=40) -> DatasetEntry:
+    # In case we want to test combinatorial generalization we can provide our own allowed combinations
+    if combinations is None:
+        combinations = list(itertools.product([Circle, Triangle, Square], ['red', 'green', 'blue']))
+
+    chosen_combinations = random.choices(combinations, k=num_shapes)
+    chosen_shape_types = list(map(lambda x: x[0], chosen_combinations))
+    chosen_colors = list(map(lambda x: x[1], chosen_combinations))
+    shapes = scatter_shapes(chosen_shape_types, size[0], size[1], scale)
 
     image = Image.new('RGB', size, background)
     draw = ImageDraw.Draw(image)
@@ -142,6 +156,7 @@ def generate_image(num_shapes: int, create_mask: bool, size: (int, int) = (224, 
         mask_draw = ImageDraw.Draw(mask)
 
     for shape, color in zip(shapes, chosen_colors):
+        shape.color = color
         if isinstance(shape, Triangle):
             draw.polygon((shape.p1, shape.p2, shape.p3), fill=color)
             if create_mask:
@@ -158,8 +173,3 @@ def generate_image(num_shapes: int, create_mask: bool, size: (int, int) = (224, 
             if create_mask:
                 mask_draw.rectangle((shape.top_left, shape.bottom_right), fill='white')
     return DatasetEntry(shapes, image, mask)
-
-
-entry = generate_image(8, True)
-entry.image.save("shapes/test.png", "PNG")
-entry.mask.save("shapes/test_mask.png", "PNG")

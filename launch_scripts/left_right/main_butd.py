@@ -13,9 +13,9 @@ sys.path.insert(1, str(Path(__file__).parents[2]))
 
 from datasets.emnist import EmnistLeftRight
 from modules.left_right import LeftRightBUTD
-from utils.training import set_random_seed, train
+from utils.training import set_random_seed, train, count_parameters
 
-# os.environ["WANDB_MODE"] = "disabled"
+os.environ["WANDB_MODE"] = "disabled"
 # torch.autograd.set_detect_anomaly(True)
 
 run_config = {
@@ -26,7 +26,7 @@ run_config = {
     'seed': 57,
     'batch_size': 256,
     'dataset_size': 100000,
-    'mix_layer': 'v',
+    'mix_layer': 'q',
     'add_self_attention': True,
     'type': 'multiplication'
 }

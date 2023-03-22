@@ -63,7 +63,7 @@ class LeftRightBUTD(nn.Module):
         argument_tokens = self.argument_embeddings(argument)
 
         task_input = self.stretch_embedding(self.relu(torch.cat((task_tokens, argument_tokens), dim=1))).view(
-            *embedded_image.shape) + self.task_position_embeddings
+            *embedded_image.req_shape) + self.task_position_embeddings
 
         mixing_layers = []
 
