@@ -6,16 +6,17 @@ from transformers.models.vit.modeling_vit import ViTEmbeddings
 from modules.core import TaskEmbeddings, TaskDecoderBlock, LateralEncoderBlock, TransparentEncoderBlock
 
 
-class LeftRightEncDec(nn.Module):
+class EncDecBUTD(nn.Module):
 
-    def __init__(self, num_classes, enc_config: ViTConfig, dec_config: ViTConfig, use_butd):
+    def __init__(self, num_tasks: int, num_classes: int, enc_config: ViTConfig, dec_config: ViTConfig, use_butd: bool):
         super().__init__()
         self.use_butd = use_butd
+        self.num_tasks = num_tasks
         self.encoder = ViTModel(enc_config, add_pooling_layer=False)
         self.decoder_blocks = nn.ModuleList(
             [TaskDecoderBlock(enc_config=enc_config, dec_config=dec_config) for _ in
              range(dec_config.num_hidden_layers)])
-        self.task_embeddings = nn.Linear(in_features=2, out_features=dec_config.hidden_size)
+        self.task_embeddings = nn.Linear(in_features=num_tasks, out_features=dec_config.hidden_size)
         self.argument_embeddings = nn.Linear(in_features=num_classes, out_features=dec_config.hidden_size)
         self.layernorm = nn.LayerNorm(enc_config.hidden_size, eps=enc_config.layer_norm_eps)
         self.task_position_embeddings = nn.Parameter(torch.zeros(1, 2, dec_config.hidden_size))
@@ -37,16 +38,17 @@ class LeftRightEncDec(nn.Module):
         return self.classifier(decoder_state[:, 0, :])
 
 
-class LeftRightBUTD(nn.Module):
+class MixingBUTD(nn.Module):
 
-    def __init__(self, num_classes, config: ViTConfig, total_token_size, use_self_attention, mix_with):
+    def __init__(self, num_tasks: int, num_classes: int, config: ViTConfig, total_token_size: int,
+                 use_self_attention: bool, mix_with: str):
         super().__init__()
         self.task_encoder_blocks = nn.ModuleList(
             [TransparentEncoderBlock(config, mix_with) for _ in range(config.num_hidden_layers)])
         self.image_embeddings = ViTEmbeddings(config)
         self.image_encoder_blocks = nn.ModuleList(
             [LateralEncoderBlock(config, mix_with, use_self_attention) for _ in range(config.num_hidden_layers)])
-        self.task_embeddings = nn.Linear(in_features=2, out_features=config.hidden_size)
+        self.task_embeddings = nn.Linear(in_features=num_tasks, out_features=config.hidden_size)
         self.argument_embeddings = nn.Linear(in_features=num_classes, out_features=config.hidden_size)
         self.relu = nn.ReLU()
         self.stretch_embedding = nn.Linear(in_features=2 * config.hidden_size, out_features=total_token_size)
@@ -63,7 +65,7 @@ class LeftRightBUTD(nn.Module):
         argument_tokens = self.argument_embeddings(argument)
 
         task_input = self.stretch_embedding(self.relu(torch.cat((task_tokens, argument_tokens), dim=1))).view(
-            *embedded_image.req_shape) + self.task_position_embeddings
+            *embedded_image.shape) + self.task_position_embeddings
 
         mixing_layers = []
 
@@ -77,15 +79,15 @@ class LeftRightBUTD(nn.Module):
         return self.classifier(self.layernorm(embedded_image[:, 0, :]))
 
 
-class LeftRightEncoder(nn.Module):
-    def __init__(self, num_classes, enc_config: ViTConfig):
+class EncoderBUTD(nn.Module):
+    def __init__(self, num_tasks: int, num_classes: int, enc_config: ViTConfig):
         super().__init__()
         encoder = ViTForImageClassification(enc_config)
         self.embeddings = TaskEmbeddings(encoder.vit.get_input_embeddings(), enc_config.hidden_size)
         self.layer_norm = encoder.vit.layernorm
         self.encoder = encoder.vit.encoder
         self.classifier = nn.Linear(in_features=enc_config.hidden_size, out_features=num_classes)
-        self.task_embeddings = nn.Linear(in_features=2, out_features=enc_config.hidden_size)
+        self.task_embeddings = nn.Linear(in_features=num_tasks, out_features=enc_config.hidden_size)
         self.argument_embeddings = nn.Linear(in_features=num_classes, out_features=enc_config.hidden_size)
 
     def forward(self, img: torch.FloatTensor, task: torch.FloatTensor, argument: torch.FloatTensor):

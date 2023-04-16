@@ -11,7 +11,7 @@ from transformers import ViTConfig
 
 sys.path.insert(1, str(Path(__file__).parents[2]))
 
-from datasets.emnist import EmnistLRBoth, EmnistLeftRight
+from datasets.emnist import Emnist6LRBoth, Emnist6LeftRight
 from modules.left_right import LRBothEncoder
 from utils.training import set_random_seed, train
 from utils.unpacking import two_task_unpack
@@ -35,10 +35,10 @@ set_random_seed(wandb.config['seed'])
 NUM_CLASSES = 47
 
 transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor()])
-train_data = EmnistLRBoth("/home/agroskin/ViT/6_extended50k1/train/", NUM_CLASSES, transform,
-                          wandb.config['dataset_size'])
-val_data = EmnistLeftRight("/home/agroskin/ViT/6_extended50k1/val/", NUM_CLASSES, transform)
-test_data = EmnistLeftRight("/home/agroskin/ViT/6_extended50k1/test/", NUM_CLASSES, transform)
+train_data = Emnist6LRBoth("/home/agroskin/ViT/6_extended50k1/train/", NUM_CLASSES, transform,
+                           wandb.config['dataset_size'])
+val_data = Emnist6LeftRight("/home/agroskin/ViT/6_extended50k1/val/", NUM_CLASSES, transform)
+test_data = Emnist6LeftRight("/home/agroskin/ViT/6_extended50k1/test/", NUM_CLASSES, transform)
 
 BATCH_SIZE = wandb.config['batch_size']
 
@@ -61,7 +61,7 @@ wandb.watch(model)
 MODEL_NAME = "leftright_encoder_parallel"
 
 train_loss, val_loss, test_loss = train(model, train_loader, val_loader, test_loader, loss, optimizer, two_task_unpack,
-                                        "cuda:0", n_epochs=100, scheduler=None, verbose=True, check_dir=None,
+                                        "cuda:0", n_epochs=100, scheduler=None, verbose=True, save_dir=None,
                                         save_every=5, model_name=MODEL_NAME, show_tqdm=False)
 
 with open(f"loss_curves_{MODEL_NAME}.txt", 'w') as f:

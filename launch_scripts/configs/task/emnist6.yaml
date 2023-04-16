@@ -1,0 +1,5 @@
+name: EMNIST-6
+num_tasks: 2
+num_classes: 47
+root_path: /home/agroskin/data/datasets/emnist-6
+dataset_size: 100000

@@ -1,0 +1,8 @@
+name: enc-dec
+encoder_hidden_size: 240
+encoder_intermediate_size: 768
+num_encoder_layers: 3
+decoder_hidden_size: 120
+decoder_intermediate_size: 384
+num_decoder_layers: 4
+use_butd: false

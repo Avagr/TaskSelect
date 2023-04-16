@@ -1,0 +1,21 @@
+defaults:
+    - _self_
+    - task: emnist6
+    - model: encoder
+
+name: "${task.name} ${model.name} ${v}"
+v: ???
+seed: 57
+num_workers: 6
+pin_memory: true
+batch_size: 256
+disable_wandb: false
+lr: 3e-4
+scheduler_patience: 8
+num_epochs: 120
+print_epochs: true
+show_tqdm: false
+save_best: true
+save_directory: /home/agroskin/data/models
+
+

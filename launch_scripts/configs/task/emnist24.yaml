@@ -1,0 +1,5 @@
+name: EMNIST-24
+num_tasks: 4
+num_classes: 47
+root_path: /home/agroskin/data/datasets/emnist-24
+dataset_size: null

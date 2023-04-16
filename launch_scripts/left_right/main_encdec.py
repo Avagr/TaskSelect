@@ -11,8 +11,8 @@ from transformers import ViTConfig
 
 sys.path.insert(1, str(Path(__file__).parents[2]))
 
-from datasets.emnist import EmnistLeftRight
-from modules.left_right import LeftRightEncDec
+from datasets.emnist import Emnist6LeftRight
+from modules.left_right import BUTDEncDec
 from utils.training import set_random_seed, train
 
 os.environ["WANDB_MODE"] = "disabled"
@@ -39,10 +39,10 @@ set_random_seed(wandb.config['seed'])
 NUM_CLASSES = 47
 
 transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor()])
-train_data = EmnistLeftRight("/home/agroskin/ViT/6_extended50k1/train/", NUM_CLASSES, transform,
-                             wandb.config['dataset_size'])
-val_data = EmnistLeftRight("/home/agroskin/ViT/6_extended50k1/val/", NUM_CLASSES, transform)
-test_data = EmnistLeftRight("/home/agroskin/ViT/6_extended50k1/test/", NUM_CLASSES, transform)
+train_data = Emnist6LeftRight("/home/agroskin/ViT/6_extended50k1/train/", NUM_CLASSES, transform,
+                              wandb.config['dataset_size'])
+val_data = Emnist6LeftRight("/home/agroskin/ViT/6_extended50k1/val/", NUM_CLASSES, transform)
+test_data = Emnist6LeftRight("/home/agroskin/ViT/6_extended50k1/test/", NUM_CLASSES, transform)
 
 BATCH_SIZE = wandb.config['batch_size']
 
@@ -50,7 +50,7 @@ train_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True, num_w
 val_loader = DataLoader(val_data, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
 test_loader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
 
-model = LeftRightEncDec(num_classes=NUM_CLASSES, enc_config=ViTConfig(
+model = BUTDEncDec(num_classes=NUM_CLASSES, enc_config=ViTConfig(
     hidden_size=wandb.config['encoder_hidden_size'],
     num_hidden_layers=wandb.config['num_encoder_layers'],
     intermediate_size=wandb.config['encoder_intermediate_size']), dec_config=ViTConfig(
@@ -68,7 +68,7 @@ MODEL_NAME = "leftright_encoder-decoder_last_state"
 
 train_loss, val_loss, test_loss = train(model, train_loader, val_loader, test_loader, loss, optimizer, "cuda:0",
                                         n_epochs=150, scheduler=None, verbose=True,
-                                        check_dir=None, save_every=5,
+                                        save_dir=None, save_every=5,
                                         model_name=MODEL_NAME, show_tqdm=False)
 
 with open(f"loss_curves_{MODEL_NAME}.txt", 'w') as f:

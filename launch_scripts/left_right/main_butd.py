@@ -11,8 +11,8 @@ from transformers import ViTConfig
 
 sys.path.insert(1, str(Path(__file__).parents[2]))
 
-from datasets.emnist import EmnistLeftRight
-from modules.left_right import LeftRightBUTD
+from datasets.emnist import Emnist6LeftRight
+from modules.multitask import MixingBUTD
 from utils.training import set_random_seed, train, count_parameters
 
 os.environ["WANDB_MODE"] = "disabled"
@@ -38,10 +38,10 @@ set_random_seed(run_config['seed'])
 NUM_CLASSES = 47
 
 transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor()])
-train_data = EmnistLeftRight("/home/agroskin/ViT/6_extended50k1/train/", NUM_CLASSES, transform,
-                             run_config['dataset_size'])
-val_data = EmnistLeftRight("/home/agroskin/ViT/6_extended50k1/val/", NUM_CLASSES, transform)
-test_data = EmnistLeftRight("/home/agroskin/ViT/6_extended50k1/test/", NUM_CLASSES, transform)
+train_data = Emnist6LeftRight("/home/agroskin/ViT/6_extended50k1/train/", NUM_CLASSES, transform,
+                              run_config['dataset_size'])
+val_data = Emnist6LeftRight("/home/agroskin/ViT/6_extended50k1/val/", NUM_CLASSES, transform)
+test_data = Emnist6LeftRight("/home/agroskin/ViT/6_extended50k1/test/", NUM_CLASSES, transform)
 
 BATCH_SIZE = run_config['batch_size']
 
@@ -49,13 +49,13 @@ train_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True, num_w
 val_loader = DataLoader(val_data, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
 test_loader = DataLoader(test_data, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
 
-model = LeftRightBUTD(num_classes=NUM_CLASSES, config=ViTConfig(
+model = MixingBUTD(num_classes=NUM_CLASSES, num_tasks=2, config=ViTConfig(
     hidden_size=run_config['hidden_size'],
     num_hidden_layers=run_config['num_layers'],
     intermediate_size=run_config['intermediate_size']),
-                      mix_with=run_config['mix_layer'],
-                      use_self_attention=run_config['add_self_attention'],
-                      total_token_size=run_config['hidden_size'] * 197)
+                   mix_with=run_config['mix_layer'],
+                   use_self_attention=run_config['add_self_attention'],
+                   total_token_size=run_config['hidden_size'] * 197)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=run_config['lr'])
 loss = nn.CrossEntropyLoss()
@@ -67,7 +67,7 @@ MODEL_NAME = "leftright_butd"
 
 train_loss, val_loss, test_loss = train(model, train_loader, val_loader, test_loader, loss, optimizer, "cuda:0",
                                         n_epochs=150, scheduler=None, verbose=True,
-                                        check_dir=None, save_every=5,
+                                        save_dir=None, save_every=5,
                                         model_name=MODEL_NAME, show_tqdm=False)
 
 with open(f"loss_curves_{MODEL_NAME}.txt", 'w') as f:

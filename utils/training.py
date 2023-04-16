@@ -1,3 +1,5 @@
+from typing import Optional
+
 import os
 import random
 from pathlib import Path
@@ -79,8 +81,8 @@ def predict(model, val_dataloader, criterion, device="cuda:0", verbose=False) ->
 
 
 def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, optimizer, model_wrapper=basic_unpack,
-          device="cuda:0", n_epochs=10, scheduler=None, verbose=False, check_dir=None, save_every=None,
-          model_name="Model", show_tqdm=False) -> (list[float], list[float], list[float]):
+          device="cuda:0", n_epochs=10, scheduler=None, verbose=False, save_dir: Path = None, save_best=False,
+          model_name: str = None, show_tqdm=False) -> (list[float], list[float], list[float]):
     """
     Train the model
     :param model: model to train
@@ -94,39 +96,64 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, o
     :param n_epochs: number of training epochs
     :param scheduler: scheduler for the learning rate (should be set to 'max' mode)
     :param verbose: whether to print end-of-epoch loss messages
-    :param check_dir: directory to save model checkpoints to
-    :param save_every: number of epochs between saves
+    :param save_dir: directory to save model checkpoints to
+    :param save_best: whether to save the best model
     :param model_name: name of the model for Tensorboard logging and saving
     :param show_tqdm: whether to show tqdm progress bars
 
-    :returns: a pair of train and validation loss histories through the epochs
+    :returns: a tuple of train, validation, and test loss histories through the epochs
     """
+    if model_name is None:
+        model_name = type(model).__name__
+
+    if save_best and save_dir is None:
+        raise ValueError("Please provide a directory to save the models to")
+
     model.to(device)
     train_loss_history = []
     val_loss_history = []
     test_loss_history = []
-    print(f"Starting training of {model_name}")
+    epoch_dict: {int: Path} = {}
     val_loss = -1
-    if check_dir:
-        Path(check_dir + f"/{model_name}").mkdir(parents=True, exist_ok=True)
+    model_save_dir = None
+
+    if save_best:
+        model_save_dir = save_dir / model_name
+        model_save_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"Starting training of {model_name}")
     for epoch in range(n_epochs):
         train_loss = train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper, device, show_tqdm)
         val_losses, val_acc = predict(model, val_dataloader, criterion, device, show_tqdm)
         test_losses, test_acc = predict(model, test_dataloader, criterion, device, show_tqdm)
+
         val_loss = np.mean(val_losses).item()
         test_loss = np.mean(test_losses).item()
+
         train_loss_history.append(train_loss)
         val_loss_history.append(val_loss)
         test_loss_history.append(test_loss)
+
         wandb.log({'train_loss': train_loss, 'val_loss': val_loss, 'test_loss': test_loss, 'val_acc': val_acc.mean(),
                    'test_acc': test_acc.mean()})
         if verbose:
             print(f"Epoch {epoch + 1}, Train loss: {train_loss:.4f}, Val loss/acc: {val_loss:.4f}/{val_acc.mean():.4f},"
                   f" Test loss/acc: {test_loss:.4f}/{test_acc.mean():.4f}")
+
         if scheduler:
             scheduler.step(val_loss)
-        if check_dir and (epoch + 1) % save_every == 0:
-            torch.save(model.state_dict(), check_dir + f"/{model_name}/state.e{epoch}_l{val_loss:.5f}")
-    if check_dir:
-        torch.save(model.state_dict(), check_dir + f"/{model_name}/state.fin_l{val_loss:.5f}")
+
+        if save_best:
+            torch.save(model.state_dict(), model_save_dir / f"state.e{epoch}.pt")
+            epoch_dict[epoch] = model_save_dir / f"state.e{epoch}.pt"
+
+    if save_best:
+        best_epoch = np.argmin(val_loss_history)
+        for epoch, path in epoch_dict.items():
+            if epoch == best_epoch:
+                path.rename(save_dir / f"{model_name}_best.pt")
+            else:
+                path.unlink()
+        model_save_dir.rmdir()
+
     return train_loss_history, val_loss_history, test_loss_history
