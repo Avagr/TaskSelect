@@ -4,9 +4,13 @@ import os
 import random
 from pathlib import Path
 
+from datetime import datetime
+
 import numpy as np
 import torch
 import wandb
+from torch import autocast
+from torch.cuda.amp import GradScaler
 from tqdm.auto import tqdm
 
 from utils.unpacking import basic_unpack
@@ -21,6 +25,10 @@ def set_random_seed(seed):
     os.environ["PYTHONHASHSEED"] = str(seed)
 
 
+def timestamp():
+    return str(datetime.now())
+
+
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -29,7 +37,7 @@ def occurence_accuracy(pred, correct):
     return torch.argmax(pred, dim=1) == correct
 
 
-def train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper, device="cuda:0",
+def train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper, scaler, device="cuda:0",
                     verbose=False) -> float:
     """
     Trains a model for a single run of the dataloader
@@ -44,13 +52,14 @@ def train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper
     """
     model.train()
     losses = []
-
     for obj in tqdm(train_dataloader, disable=not verbose):
         optimizer.zero_grad()
-        loss = model_wrapper(obj, device, model, criterion)
+        with autocast(device_type="cuda", dtype=torch.float16, enabled=scaler.is_enabled()):
+            loss = model_wrapper(obj, device, model, criterion)
         losses.append(loss.item())
-        loss.backward()
-        optimizer.step()
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
     return np.mean(losses).item()
 
@@ -80,9 +89,10 @@ def predict(model, val_dataloader, criterion, device="cuda:0", verbose=False) ->
     return np.array(losses), np.array(accuracies)
 
 
-def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, optimizer, model_wrapper=basic_unpack,
-          device="cuda:0", n_epochs=10, scheduler=None, verbose=False, save_dir: Path = None, save_best=False,
-          model_name: str = None, show_tqdm=False) -> (list[float], list[float], list[float]):
+def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, optimizer: torch.optim.Optimizer,
+          model_wrapper=basic_unpack, device="cuda:0", n_epochs=10, scheduler=None, verbose=False,
+          save_dir: Path = None, save_best=False, model_name: str = None, show_tqdm=False, use_scaler=False,
+          warmup_epochs=None) -> (list[float], list[float], list[float]):
     """
     Train the model
     :param model: model to train
@@ -100,6 +110,8 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, o
     :param save_best: whether to save the best model
     :param model_name: name of the model for Tensorboard logging and saving
     :param show_tqdm: whether to show tqdm progress bars
+    :param use_scaler: whether to train in float16
+    :param warmup_epochs: number of epochs to spend for a linear warmup
 
     :returns: a tuple of train, validation, and test loss histories through the epochs
     """
@@ -121,9 +133,13 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, o
         model_save_dir = save_dir / model_name
         model_save_dir.mkdir(parents=True, exist_ok=True)
 
+    scaler = GradScaler(enabled=use_scaler, growth_interval=200)
+
     print(f"Starting training of {model_name}")
     for epoch in range(n_epochs):
-        train_loss = train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper, device, show_tqdm)
+
+        train_loss = train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper, scaler, device,
+                                     show_tqdm)
         val_losses, val_acc = predict(model, val_dataloader, criterion, device, show_tqdm)
         test_losses, test_acc = predict(model, test_dataloader, criterion, device, show_tqdm)
 
@@ -137,11 +153,12 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, o
         wandb.log({'train_loss': train_loss, 'val_loss': val_loss, 'test_loss': test_loss, 'val_acc': val_acc.mean(),
                    'test_acc': test_acc.mean()})
         if verbose:
-            print(f"Epoch {epoch + 1}, Train loss: {train_loss:.4f}, Val loss/acc: {val_loss:.4f}/{val_acc.mean():.4f},"
-                  f" Test loss/acc: {test_loss:.4f}/{test_acc.mean():.4f}")
+            print(
+                f"[{timestamp()}] Epoch {epoch + 1}, Train loss: {train_loss:.4f}, Val loss/acc: {val_loss:.4f}/{val_acc.mean():.4f},"
+                f" Test loss/acc: {test_loss:.4f}/{test_acc.mean():.4f}")
 
         if scheduler:
-            scheduler.step(val_loss)
+            scheduler.step()
 
         if save_best:
             torch.save(model.state_dict(), model_save_dir / f"state.e{epoch}.pt")

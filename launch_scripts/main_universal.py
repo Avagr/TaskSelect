@@ -8,6 +8,8 @@ import wandb
 from omegaconf import DictConfig, OmegaConf
 from torch import nn
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import ReduceLROnPlateau, LinearLR, ChainedScheduler, CosineAnnealingWarmRestarts, \
+    SequentialLR
 from torchvision import transforms
 from transformers import ViTConfig
 
@@ -24,6 +26,11 @@ def run(cfg: DictConfig):
         os.environ["WANDB_MODE"] = "disabled"
         print(OmegaConf.to_yaml(cfg))
 
+    torch.autograd.set_detect_anomaly(cfg.detect_anomalies, check_nan=True)
+
+    torch.backends.cuda.matmul.allow_tf32 = cfg.use_tf32
+    torch.backends.cudnn.allow_tf32 = cfg.use_tf32
+
     set_random_seed(cfg.seed)
 
     model = create_model(cfg)
@@ -38,7 +45,10 @@ def run(cfg: DictConfig):
                              pin_memory=cfg.pin_memory)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=cfg.scheduler_patience, verbose=True)
+    scheduler = SequentialLR(optimizer, schedulers=[
+        LinearLR(optimizer, start_factor=0.001, end_factor=1, total_iters=cfg.warmup_epochs, verbose=True),
+        CosineAnnealingWarmRestarts(optimizer, T_0=cfg.annealing_t0, verbose=True)
+    ], milestones=[cfg.warmup_epochs])
 
     wandb.init(project="BU-TD Benchmark", entity="avagr", name=cfg.name, group=cfg.task.name,
                config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True))
@@ -50,7 +60,8 @@ def run(cfg: DictConfig):
 
     _, _, _ = train(model, train_loader, val_loader, test_loader, loss, optimizer, n_epochs=cfg.num_epochs,
                     scheduler=scheduler, verbose=cfg.print_epochs, save_dir=Path(cfg.save_directory),
-                    save_best=cfg.save_best, model_name=cfg.name, show_tqdm=cfg.show_tqdm)
+                    save_best=cfg.save_best, model_name=cfg.name, show_tqdm=cfg.show_tqdm,
+                    use_scaler=cfg.mixed_precision)
 
 
 def create_model(cfg):

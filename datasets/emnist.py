@@ -107,10 +107,10 @@ class Emnist24Directions(EmnistDataset):
             x, y = random.randint(0, 2), random.randint(0, 5)
             if task_top:
                 return self.transform(img), torch.tensor([1., 0., 0., 0.]), F.one_hot(
-                    torch.tensor(labels[x, y]), self.num_classes).type(torch.FloatTensor), labels[x + 1, y]
+                    torch.tensor(labels[x + 1, y]), self.num_classes).type(torch.FloatTensor), labels[x, y]
             else:
                 return self.transform(img), torch.tensor([0., 1., 0., 0.]), F.one_hot(
-                    torch.tensor(labels[x + 1, y]), self.num_classes).type(torch.FloatTensor), labels[x, y]
+                    torch.tensor(labels[x, y]), self.num_classes).type(torch.FloatTensor), labels[x + 1, y]
         else:  # Right/Left
             task_right = random.random() < 0.5
             x, y = random.randint(0, 3), random.randint(0, 4)

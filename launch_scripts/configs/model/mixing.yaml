@@ -1,6 +1,6 @@
 name: mixing
-hidden_size: 192
-intermediate_size: 512
+hidden_size: 768
+intermediate_size: 3072
 num_layers: 3
 mix_layer: q
 use_self_attention: true

@@ -6,16 +6,23 @@ defaults:
 name: "${task.name} ${model.name} ${v}"
 v: ???
 seed: 57
+
 num_workers: 6
 pin_memory: true
 batch_size: 256
-disable_wandb: false
 lr: 3e-4
-scheduler_patience: 8
-num_epochs: 120
+warmup_epochs: 7
+annealing_t0: 7
+scheduler_patience: 16
+num_epochs: 150
+
+mixed_precision: false
+use_tf32: true
+
+disable_wandb: false
 print_epochs: true
 show_tqdm: false
-save_best: true
+save_best: false
 save_directory: /home/agroskin/data/models
-
+detect_anomalies: false
 
