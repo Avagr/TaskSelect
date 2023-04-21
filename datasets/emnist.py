@@ -32,12 +32,18 @@ class EmnistDataset(Dataset):
 
 class EmnistExistence(EmnistDataset):
 
+    def __init__(self, data_root: str, num_classes, transform, num_tasks, size_limit: Optional[int] = None):
+        super().__init__(data_root, num_classes, transform, size_limit)
+        self.task_vector = torch.zeros(num_tasks)
+        self.args_vector = torch.zeros(num_classes)
+
     def __getitem__(self, item):
         path_stub = self.path_stubs[item]
         img = Image.open(f"{path_stub}img.jpg")
         with open(f"{path_stub}raw.pkl", 'rb') as f:
             namespace = pickle.load(f)
-        return self.transform(img), torch.Tensor(namespace.label_existence)
+        return self.transform(img)[0].unsqueeze(0), self.task_vector, self.args_vector, torch.Tensor(
+            namespace.label_existence)
 
 
 class EmnistRightOfMatrix(EmnistDataset):
@@ -46,7 +52,7 @@ class EmnistRightOfMatrix(EmnistDataset):
         path_stub = self.path_stubs[item]
         img = Image.open(f"{path_stub}img.jpg")
         right_of = torch.load(f"{path_stub}rightof.pt")
-        return self.transform(img), right_of
+        return self.transform(img)[0].unsqueeze(0), right_of
 
 
 class Emnist6LeftRight(EmnistDataset):
@@ -64,9 +70,9 @@ class Emnist6LeftRight(EmnistDataset):
         task_right_of = random.random() < 0.5
         index = random.randint(0, 4)
         if task_right_of:
-            return self.transform(img), torch.tensor([1., 0.]), F.one_hot(
+            return self.transform(img)[0].unsqueeze(0), torch.tensor([1., 0.]), F.one_hot(
                 torch.tensor(labels[index]), self.num_classes).type(torch.FloatTensor), labels[index + 1]
-        return self.transform(img), torch.tensor([0., 1.]), F.one_hot(
+        return self.transform(img)[0].unsqueeze(0), torch.tensor([0., 1.]), F.one_hot(
             torch.tensor(labels[index + 1]), self.num_classes).type(torch.FloatTensor), labels[index]
 
 
@@ -90,9 +96,9 @@ class Emnist6LRBoth(EmnistDataset):
         task_l, arg_l, res_l = torch.tensor([0., 1.]), F.one_hot(
             torch.tensor(labels[left_of_index]), self.num_classes).type(torch.FloatTensor), labels[left_of_index - 1]
         if random.random() < 0.5:
-            return self.transform(img), task_r, arg_r, res_r, task_l, arg_l, res_l
+            return self.transform(img)[0].unsqueeze(0), task_r, arg_r, res_r, task_l, arg_l, res_l
         else:
-            return self.transform(img), task_l, arg_l, res_l, task_r, arg_r, res_r
+            return self.transform(img)[0].unsqueeze(0), task_l, arg_l, res_l, task_r, arg_r, res_r
 
 
 class Emnist24Directions(EmnistDataset):
@@ -106,17 +112,17 @@ class Emnist24Directions(EmnistDataset):
             task_top = random.random() < 0.5
             x, y = random.randint(0, 2), random.randint(0, 5)
             if task_top:
-                return self.transform(img), torch.tensor([1., 0., 0., 0.]), F.one_hot(
+                return self.transform(img)[0].unsqueeze(0), torch.tensor([1., 0., 0., 0.]), F.one_hot(
                     torch.tensor(labels[x + 1, y]), self.num_classes).type(torch.FloatTensor), labels[x, y]
             else:
-                return self.transform(img), torch.tensor([0., 1., 0., 0.]), F.one_hot(
+                return self.transform(img)[0].unsqueeze(0), torch.tensor([0., 1., 0., 0.]), F.one_hot(
                     torch.tensor(labels[x, y]), self.num_classes).type(torch.FloatTensor), labels[x + 1, y]
         else:  # Right/Left
             task_right = random.random() < 0.5
             x, y = random.randint(0, 3), random.randint(0, 4)
             if task_right:
-                return self.transform(img), torch.tensor([0., 0., 1., 0.]), F.one_hot(
+                return self.transform(img)[0].unsqueeze(0), torch.tensor([0., 0., 1., 0.]), F.one_hot(
                     torch.tensor(labels[x, y]), self.num_classes).type(torch.FloatTensor), labels[x, y + 1]
             else:
-                return self.transform(img), torch.tensor([0., 0., 0., 1.]), F.one_hot(
+                return self.transform(img)[0].unsqueeze(0), torch.tensor([0., 0., 0., 1.]), F.one_hot(
                     torch.tensor(labels[x, y + 1]), self.num_classes).type(torch.FloatTensor), labels[x, y]

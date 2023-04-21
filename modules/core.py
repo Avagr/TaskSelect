@@ -11,12 +11,14 @@ class TaskEmbeddings(nn.Module):
         super().__init__()
         self.patch_embeddings = patch_embeddings
         num_patches = self.patch_embeddings.num_patches
-        self.position_embeddings = nn.Parameter(torch.zeros(1, num_patches + 2 * num_tasks, hidden_size))
+        self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_size))
+        self.position_embeddings = nn.Parameter(torch.zeros(1, 1 + num_patches + 2 * num_tasks, hidden_size))
 
     def forward(self, pixel_values, task_tokens: list[torch.Tensor], argument_tokens: list[torch.Tensor]):
         embeddings = self.patch_embeddings(pixel_values)
         tasks = list(zip(task_tokens, argument_tokens))
-        embeddings = torch.cat((*[item for pair in tasks for item in pair], embeddings), dim=1)
+        cls_tokens = self.cls_token.expand(pixel_values.shape[0], -1, -1)
+        embeddings = torch.cat((cls_tokens, *[item for pair in tasks for item in pair], embeddings), dim=1)
         return embeddings + self.position_embeddings
 
 

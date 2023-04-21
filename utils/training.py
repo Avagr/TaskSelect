@@ -37,6 +37,12 @@ def occurence_accuracy(pred, correct):
     return torch.argmax(pred, dim=1) == correct
 
 
+def topk_accuracy(pred, correct, k=24):
+    dim = pred.shape[-1]
+    thresh = torch.kthvalue(pred, dim=1, k=dim - k + 1, keepdim=True).values
+    return ((pred >= thresh) * correct).sum(dim=1) / k
+
+
 def train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper, scaler, device="cuda:0",
                     verbose=False) -> float:
     """
@@ -65,7 +71,8 @@ def train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper
 
 
 @torch.no_grad()
-def predict(model, val_dataloader, criterion, device="cuda:0", verbose=False) -> (np.array, np.array):
+def predict(model, val_dataloader, criterion, device="cuda:0", verbose=False,
+            acc_metric=occurence_accuracy, acc_args=None) -> (np.array, np.array):
     """
     Predicts the results for a loader
     :param model: model to use in prediction
@@ -73,8 +80,12 @@ def predict(model, val_dataloader, criterion, device="cuda:0", verbose=False) ->
     :param criterion: loss to evaluate on a model
     :param device: computation device
     :param verbose: whether to print tqdm bar
+    :param acc_metric: accuracy metric function
+    :param acc_args: arguments for the accuracy function
     :return: losses for each batch, accuracies for each object
     """
+    if acc_args is None:
+        acc_args = []
     model.to(device)
     model.eval()
     losses = []
@@ -83,16 +94,17 @@ def predict(model, val_dataloader, criterion, device="cuda:0", verbose=False) ->
     for pic, task, arg, res in tqdm(val_dataloader, disable=not verbose):
         pic, task, arg, res = pic.to(device), task.to(device), arg.to(device), res.to(device)
         prediction = model(pic, task, arg)
-        accuracies.extend(occurence_accuracy(prediction, res).cpu())
+        accuracies.extend(acc_metric(prediction, res, *acc_args).cpu())
         losses.append(criterion(prediction, res).item())
 
     return np.array(losses), np.array(accuracies)
 
 
-def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, optimizer: torch.optim.Optimizer,
+def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, accuracy_metric,
+          optimizer: torch.optim.Optimizer,
           model_wrapper=basic_unpack, device="cuda:0", n_epochs=10, scheduler=None, verbose=False,
           save_dir: Path = None, save_best=False, model_name: str = None, show_tqdm=False, use_scaler=False,
-          warmup_epochs=None) -> (list[float], list[float], list[float]):
+          warmup_epochs=None, accuracy_args=None) -> (list[float], list[float], list[float]):
     """
     Train the model
     :param model: model to train
@@ -100,6 +112,7 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, o
     :param val_dataloader: loader with validation data
     :param test_dataloader: loader with testing data
     :param criterion: loss criterion
+    :param accuracy_metric: accuracy metric function
     :param model_wrapper: wrapper function to get a single loss tensor from the model
     :param optimizer: weight optimizer
     :param device: computation device
@@ -112,6 +125,7 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, o
     :param show_tqdm: whether to show tqdm progress bars
     :param use_scaler: whether to train in float16
     :param warmup_epochs: number of epochs to spend for a linear warmup
+    :param accuracy_args: additional parameters for the accuracy metric
 
     :returns: a tuple of train, validation, and test loss histories through the epochs
     """
@@ -140,8 +154,10 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, o
 
         train_loss = train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper, scaler, device,
                                      show_tqdm)
-        val_losses, val_acc = predict(model, val_dataloader, criterion, device, show_tqdm)
-        test_losses, test_acc = predict(model, test_dataloader, criterion, device, show_tqdm)
+        val_losses, val_acc = predict(model, val_dataloader, criterion, device, show_tqdm, accuracy_metric,
+                                      accuracy_args)
+        test_losses, test_acc = predict(model, test_dataloader, criterion, device, show_tqdm, accuracy_metric,
+                                        accuracy_args)
 
         val_loss = np.mean(val_losses).item()
         test_loss = np.mean(test_losses).item()

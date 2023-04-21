@@ -1,0 +1,4 @@
+name: classifier
+hidden_size: 384
+intermediate_size: 768
+num_layers: 6
