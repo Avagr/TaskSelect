@@ -1,0 +1,6 @@
+name: locator
+hidden_size: 384
+intermediate_size: 768
+num_layers: 6
+patch_size: 16
+sinusoidal: true

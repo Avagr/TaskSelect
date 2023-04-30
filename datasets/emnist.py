@@ -46,6 +46,25 @@ class EmnistExistence(EmnistDataset):
             namespace.label_existence)
 
 
+class EmnistLocation(EmnistDataset):
+
+    def __init__(self, data_root: str, num_classes, transform, num_tasks, size_limit: Optional[int] = None):
+        super().__init__(data_root, num_classes, transform, size_limit)
+        self.task_vector = torch.zeros(num_tasks)
+        # self.args_vector = torch.zeros(num_classes)
+
+    def __getitem__(self, item):
+        path_stub = self.path_stubs[item]
+        img = Image.open(f"{path_stub}img.jpg")
+        with open(f"{path_stub}raw.pkl", 'rb') as f:
+            labels = pickle.load(f).label_ordered
+        # pos = 0
+        pos = random.randint(0, 23)
+        return self.transform(img)[0].unsqueeze(0), self.task_vector, F.one_hot(torch.tensor(pos),
+                                                                                self.num_classes).type(
+            torch.FloatTensor), labels[pos // 6, pos % 6]
+
+
 class EmnistRightOfMatrix(EmnistDataset):
 
     def __getitem__(self, item):

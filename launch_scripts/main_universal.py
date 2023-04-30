@@ -15,7 +15,7 @@ from transformers import ViTConfig
 
 sys.path.insert(1, str(Path(__file__).parents[1]))
 
-from datasets.emnist import Emnist6LeftRight, Emnist24Directions, EmnistExistence
+from datasets.emnist import Emnist6LeftRight, Emnist24Directions, EmnistExistence, EmnistLocation
 from modules.multitask import EncoderBUTD, EncDecBUTD, MixingBUTD
 from utils.training import set_random_seed, train, occurence_accuracy, topk_accuracy
 
@@ -44,13 +44,21 @@ def run(cfg: DictConfig):
     test_loader = DataLoader(test_data, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers,
                              pin_memory=cfg.pin_memory)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)
-    scheduler = LinearLR(optimizer, start_factor=0.001, end_factor=1, total_iters=cfg.warmup_epochs, verbose=True)
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)  # TODO weight decay
+    schedulers = []
+    if cfg.warmup_epochs > 0:
+        schedulers.append(
+            LinearLR(optimizer, start_factor=0.001, end_factor=1, total_iters=cfg.warmup_epochs, verbose=True))
     if cfg.annealing_t0 > 0:
-        scheduler = SequentialLR(optimizer, schedulers=[
-            scheduler,
-            CosineAnnealingWarmRestarts(optimizer, T_0=cfg.annealing_t0, verbose=True)
-        ], milestones=[cfg.warmup_epochs])
+        schedulers.append(CosineAnnealingWarmRestarts(optimizer, T_0=cfg.annealing_t0, verbose=True))
+
+    match len(schedulers):
+        case 0:
+            scheduler = None
+        case 1:
+            scheduler = schedulers[0]
+        case _:
+            scheduler = SequentialLR(optimizer, schedulers=schedulers, milestones=[cfg.warmup_epochs])
 
     wandb.init(project="BU-TD Benchmark", entity="avagr", name=cfg.name, group=cfg.task.name,
                config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True))
@@ -72,12 +80,14 @@ def create_model(cfg):
             model = EncoderBUTD(cfg.task.num_tasks, cfg.task.num_classes, enc_config=ViTConfig(
                 hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
                 intermediate_size=cfg.model.intermediate_size, num_channels=cfg.task.num_channels,
-            ))
+            ), use_sinusoidal=cfg.model.sinusoidal)
 
             if cfg.model.initialize_from is not None:
                 state_dict = torch.load(cfg.model.initialize_from)
                 # print(state_dict.keys())
-                del [state_dict['classifier.weight'], state_dict['classifier.bias']]
+                del [state_dict['classifier.weight'], state_dict['classifier.bias'],
+                     state_dict['argument_embeddings.weight'], state_dict['argument_embeddings.bias'],
+                     state_dict['task_embeddings.weight'], state_dict['task_embeddings.bias']]
                 model.load_state_dict(state_dict, strict=False)
 
         case "enc-dec":
@@ -100,7 +110,14 @@ def create_model(cfg):
             model = EncoderBUTD(cfg.task.num_tasks, cfg.task.num_classes, enc_config=ViTConfig(
                 hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
                 intermediate_size=cfg.model.intermediate_size, num_channels=cfg.task.num_channels,
-            ))
+            ), use_sinusoidal=cfg.model.sinusoidal)
+
+        case "locator":
+            model = EncoderBUTD(cfg.task.num_tasks, cfg.task.num_classes, enc_config=ViTConfig(
+                hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
+                intermediate_size=cfg.model.intermediate_size, num_channels=cfg.task.num_channels,
+                patch_size=cfg.model.patch_size),
+                                use_sinusoidal=cfg.model.sinusoidal)
 
         case _:
             raise ValueError(f"Model {cfg.model.name} is not supported")
@@ -142,6 +159,19 @@ def parse_task(cfg):
                                        num_tasks=cfg.task.num_tasks)
             test_data = EmnistExistence(os.path.join(cfg.task.root_path, "test"), cfg.task.num_classes, transform,
                                         num_tasks=cfg.task.num_tasks)
+
+        case "EMNIST-24-Location":
+            loss = nn.CrossEntropyLoss()
+            acc_metric = occurence_accuracy
+            acc_args = None
+            transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor(),
+                                            transforms.Normalize(mean=(cfg.task.mean,), std=(cfg.task.std,))])
+            train_data = EmnistLocation(os.path.join(cfg.task.root_path, "train"), cfg.task.num_classes, transform,
+                                        size_limit=cfg.task.dataset_size, num_tasks=cfg.task.num_tasks)
+            val_data = EmnistLocation(os.path.join(cfg.task.root_path, "val"), cfg.task.num_classes, transform,
+                                      num_tasks=cfg.task.num_tasks)
+            test_data = EmnistLocation(os.path.join(cfg.task.root_path, "test"), cfg.task.num_classes, transform,
+                                       num_tasks=cfg.task.num_tasks)
         case _:
             raise ValueError(f"Dataset {cfg.task.name} is not supported")
     return train_data, val_data, test_data, loss, acc_metric, acc_args

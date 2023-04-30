@@ -4,3 +4,5 @@ intermediate_size: 3072
 num_layers: 3
 mix_layer: q
 use_self_attention: true
+patch_size: 16
+sinusoidal: true

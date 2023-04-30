@@ -6,3 +6,5 @@ decoder_hidden_size: 768
 decoder_intermediate_size: 3072
 num_decoder_layers: 3
 use_butd: false
+patch_size: 16
+sinusoidal: true

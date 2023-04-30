@@ -12,7 +12,7 @@ pin_memory: true
 batch_size: 256
 lr: 3e-4
 warmup_epochs: 7
-annealing_t0: 7
+annealing_t0: -1
 scheduler_patience: 16
 num_epochs: 150
 

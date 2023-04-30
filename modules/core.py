@@ -1,24 +1,42 @@
 import math
 
+import numpy as np
 import torch
 from torch import nn
 from transformers import ViTConfig
 from transformers.models.vit.modeling_vit import ViTAttention
 
 
+def create_sinusoidal_embeddings(n_pos, dim, out):
+    out.detach_()
+    out.requires_grad = False
+    position_enc = np.array([[pos / np.power(10000, 2 * (j // 2) / dim) for j in range(dim)] for pos in range(n_pos)])
+    out[:, 0::2] = torch.FloatTensor(np.sin(position_enc[:, 0::2]))
+    out[:, 1::2] = torch.FloatTensor(np.cos(position_enc[:, 1::2]))
+
+
 class TaskEmbeddings(nn.Module):
-    def __init__(self, patch_embeddings: nn.Module, hidden_size: int, num_tasks=1):
+    def __init__(self, patch_embeddings: nn.Module, hidden_size: int, num_tasks=1, use_sinusoidal=False):
         super().__init__()
         self.patch_embeddings = patch_embeddings
         num_patches = self.patch_embeddings.num_patches
         self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_size))
-        self.position_embeddings = nn.Parameter(torch.zeros(1, 1 + num_patches + 2 * num_tasks, hidden_size))
+        self.use_sinusoidal = use_sinusoidal
+        if self.use_sinusoidal:
+            self.position_embeddings = nn.Embedding(1 + num_patches + 2 * num_tasks, hidden_size)
+            print("used sinusoidal")  # todo
+            create_sinusoidal_embeddings(1 + num_patches + 2 * num_tasks, hidden_size, self.position_embeddings.weight)
+            self.register_buffer("pos_indexes", torch.arange(0, 1 + num_patches + 2 * num_tasks).expand((1, -1)))
+        else:
+            self.position_embeddings = nn.Parameter(torch.zeros(1, 1 + num_patches + 2 * num_tasks, hidden_size))
 
     def forward(self, pixel_values, task_tokens: list[torch.Tensor], argument_tokens: list[torch.Tensor]):
         embeddings = self.patch_embeddings(pixel_values)
-        tasks = list(zip(task_tokens, argument_tokens))
         cls_tokens = self.cls_token.expand(pixel_values.shape[0], -1, -1)
+        tasks = list(zip(task_tokens, argument_tokens))
         embeddings = torch.cat((cls_tokens, *[item for pair in tasks for item in pair], embeddings), dim=1)
+        if self.use_sinusoidal:
+            return embeddings + self.position_embeddings(self.pos_indexes).expand_as(embeddings)
         return embeddings + self.position_embeddings
 
 
@@ -95,7 +113,7 @@ class TaskDecoderBlock(nn.Module):
 
         cross_attention_outputs = self.cross_attention(self.decoder_layernorm_cross(decoder_hidden_states),
                                                        self.encoder_layernorm_cross(encoder_hidden_states))
-        # First residual connection
+        # First residual connection TODO layernorm after
         decoder_hidden_states = cross_attention_outputs + decoder_hidden_states
 
         layer_output = self.layernorm_after(decoder_hidden_states)

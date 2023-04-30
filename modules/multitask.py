@@ -8,7 +8,8 @@ from modules.core import TaskEmbeddings, TaskDecoderBlock, LateralEncoderBlock, 
 
 class EncDecBUTD(nn.Module):
 
-    def __init__(self, num_tasks: int, num_classes: int, enc_config: ViTConfig, dec_config: ViTConfig, use_butd: bool):
+    def __init__(self, num_tasks: int, num_classes: int, enc_config: ViTConfig, dec_config: ViTConfig, use_butd: bool,
+                 use_sinusoidal=False):
         super().__init__()
         self.use_butd = use_butd
         self.num_tasks = num_tasks
@@ -80,10 +81,11 @@ class MixingBUTD(nn.Module):
 
 
 class EncoderBUTD(nn.Module):
-    def __init__(self, num_tasks: int, num_classes: int, enc_config: ViTConfig):
+    def __init__(self, num_tasks: int, num_classes: int, enc_config: ViTConfig, use_sinusoidal=False):
         super().__init__()
         encoder = ViTForImageClassification(enc_config)
-        self.embeddings = TaskEmbeddings(encoder.vit.get_input_embeddings(), enc_config.hidden_size)
+        self.embeddings = TaskEmbeddings(encoder.vit.get_input_embeddings(), enc_config.hidden_size,
+                                         use_sinusoidal=use_sinusoidal)
         self.layer_norm = encoder.vit.layernorm
         self.encoder = encoder.vit.encoder
         self.classifier = nn.Linear(in_features=enc_config.hidden_size, out_features=num_classes)
