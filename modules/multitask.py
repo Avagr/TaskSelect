@@ -81,7 +81,7 @@ class MixingBUTD(nn.Module):
 
 
 class EncoderBUTD(nn.Module):
-    def __init__(self, num_tasks: int, num_classes: int, enc_config: ViTConfig, use_sinusoidal=False):
+    def __init__(self, num_tasks: int, num_args: int, num_classes: int, enc_config: ViTConfig, use_sinusoidal=False):
         super().__init__()
         encoder = ViTForImageClassification(enc_config)
         self.embeddings = TaskEmbeddings(encoder.vit.get_input_embeddings(), enc_config.hidden_size,
@@ -90,7 +90,7 @@ class EncoderBUTD(nn.Module):
         self.encoder = encoder.vit.encoder
         self.classifier = nn.Linear(in_features=enc_config.hidden_size, out_features=num_classes)
         self.task_embeddings = nn.Linear(in_features=num_tasks, out_features=enc_config.hidden_size)
-        self.argument_embeddings = nn.Linear(in_features=num_classes, out_features=enc_config.hidden_size)
+        self.argument_embeddings = nn.Linear(in_features=num_args, out_features=enc_config.hidden_size)
 
     def forward(self, img: torch.FloatTensor, task: torch.FloatTensor, argument: torch.FloatTensor):
         task_embed = self.task_embeddings(task).unsqueeze(1)

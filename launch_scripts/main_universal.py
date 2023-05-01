@@ -16,6 +16,7 @@ from transformers import ViTConfig
 sys.path.insert(1, str(Path(__file__).parents[1]))
 
 from datasets.emnist import Emnist6LeftRight, Emnist24Directions, EmnistExistence, EmnistLocation
+from datasets.persons import PersonsClassification
 from modules.multitask import EncoderBUTD, EncDecBUTD, MixingBUTD
 from utils.training import set_random_seed, train, occurence_accuracy, topk_accuracy
 
@@ -44,7 +45,7 @@ def run(cfg: DictConfig):
     test_loader = DataLoader(test_data, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers,
                              pin_memory=cfg.pin_memory)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr)  # TODO weight decay
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)  # TODO weight decay
     schedulers = []
     if cfg.warmup_epochs > 0:
         schedulers.append(
@@ -77,10 +78,12 @@ def run(cfg: DictConfig):
 def create_model(cfg):
     match cfg.model.name:
         case "encoder":
-            model = EncoderBUTD(cfg.task.num_tasks, cfg.task.num_classes, enc_config=ViTConfig(
+            model = EncoderBUTD(cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, enc_config=ViTConfig(
                 hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
                 intermediate_size=cfg.model.intermediate_size, num_channels=cfg.task.num_channels,
-            ), use_sinusoidal=cfg.model.sinusoidal)
+                patch_size=cfg.model.patch_size, num_attention_heads=cfg.model.num_heads,
+                image_size=(cfg.task.image_h, cfg.task.image_w)),
+                                use_sinusoidal=cfg.model.sinusoidal)
 
             if cfg.model.initialize_from is not None:
                 state_dict = torch.load(cfg.model.initialize_from)
@@ -130,7 +133,9 @@ def parse_task(cfg):
             loss = nn.CrossEntropyLoss()
             acc_metric = occurence_accuracy
             acc_args = None
-            transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor()])
+            transform = transforms.Compose([
+                # transforms.Resize((224, 224)),
+                transforms.ToTensor()])
             train_data = Emnist6LeftRight(os.path.join(cfg.task.root_path, "train"), cfg.task.num_classes, transform,
                                           cfg.task.dataset_size)
             val_data = Emnist6LeftRight(os.path.join(cfg.task.root_path, "val"), cfg.task.num_classes, transform)
@@ -140,8 +145,11 @@ def parse_task(cfg):
             loss = nn.CrossEntropyLoss()
             acc_metric = occurence_accuracy
             acc_args = None
-            transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor(),
-                                            transforms.Normalize(mean=(cfg.task.mean,), std=(cfg.task.std,))])
+            transform = transforms.Compose([
+                # transforms.Resize((224, 224)), todo
+                transforms.ToTensor(),
+                # transforms.Normalize(mean=(cfg.task.mean,), std=(cfg.task.std,))
+            ])
             train_data = Emnist24Directions(os.path.join(cfg.task.root_path, "train"), cfg.task.num_classes, transform,
                                             cfg.task.dataset_size)
             val_data = Emnist24Directions(os.path.join(cfg.task.root_path, "val"), cfg.task.num_classes, transform)
@@ -172,6 +180,19 @@ def parse_task(cfg):
                                       num_tasks=cfg.task.num_tasks)
             test_data = EmnistLocation(os.path.join(cfg.task.root_path, "test"), cfg.task.num_classes, transform,
                                        num_tasks=cfg.task.num_tasks)
+
+        case "Persons":
+            loss = nn.CrossEntropyLoss()
+            acc_metric = occurence_accuracy
+            acc_args = None
+            transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor()])
+            train_data = PersonsClassification(os.path.join(cfg.task.root_path, "train"), cfg.task.num_tasks,
+                                               cfg.task.num_args, transform, size_limit=cfg.task.dataset_size)
+            val_data = PersonsClassification(os.path.join(cfg.task.root_path, "val"), cfg.task.num_tasks,
+                                             cfg.task.num_args, transform, size_limit=cfg.task.dataset_size)
+            test_data = PersonsClassification(os.path.join(cfg.task.root_path, "test"), cfg.task.num_tasks,
+                                              cfg.task.num_args, transform, size_limit=cfg.task.dataset_size)
+
         case _:
             raise ValueError(f"Dataset {cfg.task.name} is not supported")
     return train_data, val_data, test_data, loss, acc_metric, acc_args

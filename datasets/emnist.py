@@ -89,10 +89,10 @@ class Emnist6LeftRight(EmnistDataset):
         task_right_of = random.random() < 0.5
         index = random.randint(0, 4)
         if task_right_of:
-            return self.transform(img)[0].unsqueeze(0), torch.tensor([1., 0.]), F.one_hot(
-                torch.tensor(labels[index]), self.num_classes).type(torch.FloatTensor), labels[index + 1]
-        return self.transform(img)[0].unsqueeze(0), torch.tensor([0., 1.]), F.one_hot(
-            torch.tensor(labels[index + 1]), self.num_classes).type(torch.FloatTensor), labels[index]
+            arg = F.one_hot(torch.tensor(labels[index]), self.num_classes).type(torch.FloatTensor)
+            return self.transform(img)[0].unsqueeze(0), torch.tensor([1., 0.]), arg, labels[index + 1]
+        arg = F.one_hot(torch.tensor(labels[index + 1]), self.num_classes).type(torch.FloatTensor)
+        return self.transform(img)[0].unsqueeze(0), torch.tensor([0., 1.]), arg, labels[index]
 
 
 class Emnist6LRBoth(EmnistDataset):

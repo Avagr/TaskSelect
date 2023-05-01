@@ -24,7 +24,6 @@ class TaskEmbeddings(nn.Module):
         self.use_sinusoidal = use_sinusoidal
         if self.use_sinusoidal:
             self.position_embeddings = nn.Embedding(1 + num_patches + 2 * num_tasks, hidden_size)
-            print("used sinusoidal")  # todo
             create_sinusoidal_embeddings(1 + num_patches + 2 * num_tasks, hidden_size, self.position_embeddings.weight)
             self.register_buffer("pos_indexes", torch.arange(0, 1 + num_patches + 2 * num_tasks).expand((1, -1)))
         else:

@@ -3,3 +3,6 @@
 *.pkl
 /launch_scripts/instructor/tb_test/
 /test.ipynb
+/launch_scripts/outputs/
+*/.ipynb_checkpoints/
+/launch_scripts/instructor/.ipynb_checkpoints/

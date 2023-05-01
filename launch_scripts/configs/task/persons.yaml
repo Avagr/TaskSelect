@@ -1,0 +1,9 @@
+name: Persons
+image_h: 224
+image_w: 224
+num_channels: 1
+num_tasks: 6
+num_args: 6
+num_classes: 8
+root_path: /home/agroskin/data/datasets/persons
+dataset_size: 16000
