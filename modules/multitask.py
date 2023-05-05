@@ -8,8 +8,8 @@ from modules.core import TaskEmbeddings, TaskDecoderBlock, LateralEncoderBlock, 
 
 class EncDecBUTD(nn.Module):
 
-    def __init__(self, num_tasks: int, num_classes: int, enc_config: ViTConfig, dec_config: ViTConfig, use_butd: bool,
-                 use_sinusoidal=False):
+    def __init__(self, num_tasks: int, num_args: int, num_classes: int, enc_config: ViTConfig, dec_config: ViTConfig,
+                 use_butd: bool, use_sinusoidal=False, aux_head_size=None):
         super().__init__()
         self.use_butd = use_butd
         self.num_tasks = num_tasks
@@ -18,12 +18,16 @@ class EncDecBUTD(nn.Module):
             [TaskDecoderBlock(enc_config=enc_config, dec_config=dec_config) for _ in
              range(dec_config.num_hidden_layers)])
         self.task_embeddings = nn.Linear(in_features=num_tasks, out_features=dec_config.hidden_size)
-        self.argument_embeddings = nn.Linear(in_features=num_classes, out_features=dec_config.hidden_size)
-        self.layernorm = nn.LayerNorm(enc_config.hidden_size, eps=enc_config.layer_norm_eps)
+        self.argument_embeddings = nn.Linear(in_features=num_args, out_features=dec_config.hidden_size)
+        self.final_layernorm = nn.LayerNorm(dec_config.hidden_size, eps=dec_config.layer_norm_eps)
         self.task_position_embeddings = nn.Parameter(torch.zeros(1, 2, dec_config.hidden_size))
         self.classifier = nn.Linear(in_features=dec_config.hidden_size, out_features=num_classes)
+        self.bu_classifier = None
+        if aux_head_size is not None:
+            self.bu_classifier = nn.Linear(in_features=enc_config.hidden_size, out_features=aux_head_size)
+            self.final_encoder_layernorm = nn.LayerNorm(enc_config.hidden_size, eps=enc_config.layer_norm_eps)
 
-    def forward(self, img: torch.Tensor, task: torch.FloatTensor, argument: torch.FloatTensor) -> torch.Tensor:
+    def forward(self, img: torch.Tensor, task: torch.FloatTensor, argument: torch.FloatTensor):
         encoder_hidden_states = self.encoder(img, output_hidden_states=True).hidden_states
 
         task_tokens = self.task_embeddings(task).unsqueeze(1)
@@ -32,17 +36,22 @@ class EncDecBUTD(nn.Module):
         decoder_state = torch.cat((task_tokens, argument_tokens), dim=1) + self.task_position_embeddings
         if self.use_butd:
             for encoder_hidden_state, block in zip(encoder_hidden_states[::-1], self.decoder_blocks):
-                decoder_state = block(decoder_state, self.layernorm(encoder_hidden_state))
+                decoder_state = block(decoder_state, encoder_hidden_state)
         else:
             for block in self.decoder_blocks:
-                decoder_state = block(decoder_state, self.layernorm(encoder_hidden_states[-1]))
-        return self.classifier(decoder_state[:, 0, :])
+                decoder_state = block(decoder_state, encoder_hidden_states[-1])
+
+        if self.bu_classifier is None:
+            return self.classifier(self.final_layernorm(decoder_state[:, 0, :]))
+        else:
+            return self.classifier(self.final_layernorm(decoder_state[:, 0, :])), self.bu_classifier(
+                self.final_encoder_layernorm(encoder_hidden_states[-1][:, 0, :]))
 
 
 class MixingBUTD(nn.Module):
 
-    def __init__(self, num_tasks: int, num_classes: int, config: ViTConfig, total_token_size: int,
-                 use_self_attention: bool, mix_with: str):
+    def __init__(self, num_tasks: int, num_args: int, num_classes: int, config: ViTConfig, total_token_size: int,
+                 use_self_attention: bool, mix_with: str, aux_head_size=None):
         super().__init__()
         self.task_encoder_blocks = nn.ModuleList(
             [TransparentEncoderBlock(config, mix_with) for _ in range(config.num_hidden_layers)])
@@ -50,13 +59,16 @@ class MixingBUTD(nn.Module):
         self.image_encoder_blocks = nn.ModuleList(
             [LateralEncoderBlock(config, mix_with, use_self_attention) for _ in range(config.num_hidden_layers)])
         self.task_embeddings = nn.Linear(in_features=num_tasks, out_features=config.hidden_size)
-        self.argument_embeddings = nn.Linear(in_features=num_classes, out_features=config.hidden_size)
+        self.argument_embeddings = nn.Linear(in_features=num_args, out_features=config.hidden_size)
         self.relu = nn.ReLU()
         self.stretch_embedding = nn.Linear(in_features=2 * config.hidden_size, out_features=total_token_size)
         self.layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.task_position_embeddings = nn.Parameter(
             torch.zeros(1, total_token_size // config.hidden_size, config.hidden_size))
         self.classifier = nn.Linear(in_features=config.hidden_size, out_features=num_classes)
+        self.bu_classifier = None
+        if aux_head_size is not None:
+            self.bu_classifier = nn.Linear(in_features=config.hidden_size, out_features=aux_head_size)
 
     def forward(self, img: torch.Tensor, task: torch.FloatTensor, argument: torch.FloatTensor) -> torch.Tensor:
 
@@ -86,7 +98,7 @@ class EncoderBUTD(nn.Module):
         encoder = ViTForImageClassification(enc_config)
         self.embeddings = TaskEmbeddings(encoder.vit.get_input_embeddings(), enc_config.hidden_size,
                                          use_sinusoidal=use_sinusoidal)
-        self.layer_norm = encoder.vit.layernorm
+        self.layer_norm = encoder.vit.final_encoder_layernorm
         self.encoder = encoder.vit.encoder
         self.classifier = nn.Linear(in_features=enc_config.hidden_size, out_features=num_classes)
         self.task_embeddings = nn.Linear(in_features=num_tasks, out_features=enc_config.hidden_size)
@@ -107,7 +119,7 @@ class LRBothEncoder(nn.Module):
         super().__init__()
         encoder = ViTForImageClassification(enc_config)
         self.embeddings = TaskEmbeddings(encoder.vit.get_input_embeddings(), enc_config.hidden_size, num_tasks=2)
-        self.layer_norm = encoder.vit.layernorm
+        self.layer_norm = encoder.vit.final_encoder_layernorm
         self.encoder = encoder.vit.encoder
         self.classifier_1 = nn.Linear(in_features=enc_config.hidden_size, out_features=num_classes)
         self.classifier_2 = nn.Linear(in_features=enc_config.hidden_size, out_features=num_classes)

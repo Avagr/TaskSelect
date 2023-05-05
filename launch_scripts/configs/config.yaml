@@ -6,16 +6,19 @@ defaults:
 name: "${task.name} ${model.name} ${v}"
 v: ???
 seed: 57
+device: cuda:0
 
 num_workers: 6
 pin_memory: true
 batch_size: 256
+
+optim: adam
 lr: 3e-4
-weight_decay: 1e-5
+weight_decay: 0
 warmup_epochs: -1
 annealing_t0: -1
-scheduler_patience: 16
-num_epochs: 150
+scheduler_patience: 20
+num_epochs: 300
 
 mixed_precision: false
 use_tf32: true
@@ -27,3 +30,4 @@ save_best: false
 save_directory: /home/agroskin/data/models
 detect_anomalies: false
 
+model_size: ???

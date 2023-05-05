@@ -1,19 +1,15 @@
-from typing import Optional
-
 import os
 import random
-from pathlib import Path
-
 from datetime import datetime
+from pathlib import Path
 
 import numpy as np
 import torch
 import wandb
 from torch import autocast
 from torch.cuda.amp import GradScaler
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm.auto import tqdm
-
-from utils.unpacking import basic_unpack
 
 
 def set_random_seed(seed):
@@ -37,82 +33,87 @@ def occurence_accuracy(pred, correct):
     return torch.argmax(pred, dim=1) == correct
 
 
-def topk_accuracy(pred, correct, k=24):
-    dim = pred.shape[-1]
-    thresh = torch.kthvalue(pred, dim=1, k=dim - k + 1, keepdim=True).values
-    return ((pred >= thresh) * correct).sum(dim=1) / k
+class TopKAccuracy:
+    def __init__(self, k):
+        self.k = k
+
+    def __call__(self, pred, correct):
+        dim = pred.shape[-1]
+        thresh = torch.kthvalue(pred, dim=1, k=dim - self.k + 1, keepdim=True).values
+        return ((pred >= thresh) * correct).sum(dim=1) / self.k
 
 
-def train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper, scaler, device="cuda:0",
-                    verbose=False) -> float:
+def train_one_epoch(model, train_dataloader, optimizer, model_wrapper, scaler, verbose=False) -> dict:
     """
     Trains a model for a single run of the dataloader
     :param model: model to train
     :param train_dataloader: loader with training data
-    :param criterion: loss criterion
     :param optimizer: weight optimizer
     :param model_wrapper: wrapper to get a loss from the model
-    :param device: computation device
+    :param scaler: loss gradient scaler for mixed precision
     :param verbose: whether to print tqdm bar
-    :return: mean loss across all batches
+    :return: metrics
     """
     model.train()
-    losses = []
+    metrics = None
     for obj in tqdm(train_dataloader, disable=not verbose):
         optimizer.zero_grad()
         with autocast(device_type="cuda", dtype=torch.float16, enabled=scaler.is_enabled()):
-            loss = model_wrapper(obj, device, model, criterion)
-        losses.append(loss.item())
-        scaler.scale(loss).backward()
+            total_loss, batch_metrics = model_wrapper(obj, model)
+
+        scaler.scale(total_loss).backward()
         scaler.step(optimizer)
         scaler.update()
 
-    return np.mean(losses).item()
+        if metrics is None:
+            metrics = {k: [] for k in batch_metrics.keys()}
+
+        for k, v in batch_metrics.items():
+            if v.ndim > 0:
+                metrics[k].extend(v.cpu())
+            else:
+                metrics[k].append(v.item())
+
+    return {k: np.mean(v).item() for k, v in metrics.items()}
 
 
 @torch.no_grad()
-def predict(model, val_dataloader, criterion, device="cuda:0", verbose=False,
-            acc_metric=occurence_accuracy, acc_args=None) -> (np.array, np.array):
+def predict(model, val_dataloader, model_wrapper, verbose=False) -> dict:
     """
     Predicts the results for a loader
     :param model: model to use in prediction
     :param val_dataloader: dataloader with data
-    :param criterion: loss to evaluate on a model
-    :param device: computation device
+    :param model_wrapper: wrapper to get metrics from the model
     :param verbose: whether to print tqdm bar
-    :param acc_metric: accuracy metric function
-    :param acc_args: arguments for the accuracy function
-    :return: losses for each batch, accuracies for each object
+    :return: metrics dictionary
     """
-    if acc_args is None:
-        acc_args = []
-    model.to(device)
     model.eval()
-    losses = []
-    accuracies = []
+    metrics = None
 
-    for pic, task, arg, res in tqdm(val_dataloader, disable=not verbose):
-        pic, task, arg, res = pic.to(device), task.to(device), arg.to(device), res.to(device)
-        prediction = model(pic, task, arg)
-        accuracies.extend(acc_metric(prediction, res, *acc_args).cpu())
-        losses.append(criterion(prediction, res).item())
+    for obj in tqdm(val_dataloader, disable=not verbose):
+        batch_metrics = model_wrapper.evaluate(obj, model)
 
-    return np.array(losses), np.array(accuracies)
+        if metrics is None:
+            metrics = {k: [] for k in batch_metrics.keys()}
+
+        for k, v in batch_metrics.items():
+            if v.ndim > 0:
+                metrics[k].extend(v.cpu())
+            else:
+                metrics[k].append(v.item())
+
+    return {k: np.mean(v).item() for k, v in metrics.items()}
 
 
-def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, accuracy_metric,
-          optimizer: torch.optim.Optimizer,
-          model_wrapper=basic_unpack, device="cuda:0", n_epochs=10, scheduler=None, verbose=False,
-          save_dir: Path = None, save_best=False, model_name: str = None, show_tqdm=False, use_scaler=False,
-          warmup_epochs=None, accuracy_args=None) -> (list[float], list[float], list[float]):
+def train(model, train_dataloader, val_dataloader, test_dataloader, optimizer: torch.optim.Optimizer, model_wrapper,
+          device, n_epochs, scheduler=None, verbose=False, save_dir: Path = None, save_best=False,
+          model_name: str = None, show_tqdm=False, use_scaler=False):
     """
     Train the model
     :param model: model to train
     :param train_dataloader: loader with training data
     :param val_dataloader: loader with validation data
     :param test_dataloader: loader with testing data
-    :param criterion: loss criterion
-    :param accuracy_metric: accuracy metric function
     :param model_wrapper: wrapper function to get a single loss tensor from the model
     :param optimizer: weight optimizer
     :param device: computation device
@@ -124,8 +125,6 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, a
     :param model_name: name of the model for Tensorboard logging and saving
     :param show_tqdm: whether to show tqdm progress bars
     :param use_scaler: whether to train in float16
-    :param warmup_epochs: number of epochs to spend for a linear warmup
-    :param accuracy_args: additional parameters for the accuracy metric
 
     :returns: a tuple of train, validation, and test loss histories through the epochs
     """
@@ -136,11 +135,8 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, a
         raise ValueError("Please provide a directory to save the models to")
 
     model.to(device)
-    train_loss_history = []
     val_loss_history = []
-    test_loss_history = []
     epoch_dict: {int: Path} = {}
-    val_loss = -1
     model_save_dir = None
 
     if save_best:
@@ -152,29 +148,31 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, a
     print(f"Starting training of {model_name}")
     for epoch in range(n_epochs):
 
-        train_loss = train_one_epoch(model, train_dataloader, criterion, optimizer, model_wrapper, scaler, device,
-                                     show_tqdm)
-        val_losses, val_acc = predict(model, val_dataloader, criterion, device, show_tqdm, accuracy_metric,
-                                      accuracy_args)
-        test_losses, test_acc = predict(model, test_dataloader, criterion, device, show_tqdm, accuracy_metric,
-                                        accuracy_args)
+        train_metrics = train_one_epoch(model, train_dataloader, optimizer, model_wrapper, scaler, show_tqdm)
+        val_metrics = predict(model, val_dataloader, model_wrapper, show_tqdm)
+        test_metrics = predict(model, test_dataloader, model_wrapper, show_tqdm)
 
-        val_loss = np.mean(val_losses).item()
-        test_loss = np.mean(test_losses).item()
+        wandb.log(
+            {f"train_{k}": v for k, v in train_metrics.items()} | {
+                f"val_{k}": v for k, v in val_metrics.items()} | {
+                f"test_{k}": v for k, v in test_metrics.items()}
+        )
 
-        train_loss_history.append(train_loss)
-        val_loss_history.append(val_loss)
-        test_loss_history.append(test_loss)
+        val_loss_history.append(val_metrics[model_wrapper.main_key])
 
-        wandb.log({'train_loss': train_loss, 'val_loss': val_loss, 'test_loss': test_loss, 'val_acc': val_acc.mean(),
-                   'test_acc': test_acc.mean()})
         if verbose:
+            train_string = "/".join([f"{k}: {v:.4f}" for k, v in train_metrics.items()])
+            val_string = "/".join([f"{k}: {v:.4f}" for k, v in val_metrics.items()])
+            test_string = "/".join([f"{k}: {v:.4f}" for k, v in test_metrics.items()])
             print(
-                f"[{timestamp()}] Epoch {epoch + 1}, Train loss: {train_loss:.4f}, Val loss/acc: {val_loss:.4f}/{val_acc.mean():.4f},"
-                f" Test loss/acc: {test_loss:.4f}/{test_acc.mean():.4f}")
+                f"[{timestamp()}] Epoch {epoch + 1}:\n\tTrain metrics: {train_string}\n"
+                f"\tVal metrics: {val_string}\n\tTest metrics: {test_string}")
 
         if scheduler:
-            scheduler.step()
+            if isinstance(scheduler, ReduceLROnPlateau):
+                scheduler.step(train_metrics[model_wrapper.main_key])
+            else:
+                scheduler.step()
 
         if save_best:
             torch.save(model.state_dict(), model_save_dir / f"state.e{epoch}.pt")
@@ -188,5 +186,3 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, criterion, a
             else:
                 path.unlink()
         model_save_dir.rmdir()
-
-    return train_loss_history, val_loss_history, test_loss_history

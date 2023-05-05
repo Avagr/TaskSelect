@@ -1,8 +1,9 @@
 name: encoder
 hidden_size: 240
-intermediate_size: 768
-num_layers: 6
+intermediate_size: 512
+num_layers: 4
 num_heads: 12
 initialize_from: null
 patch_size: 16
-sinusoidal: true
+sinusoidal: false
+aux_head_size: null

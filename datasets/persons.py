@@ -1,13 +1,13 @@
+import abc
 import os
 import pickle
-import abc
 import random
 from typing import Optional
 
 import torch
+import torch.nn.functional as F
 from PIL import Image
 from torch.utils.data import Dataset
-import torch.nn.functional as F
 
 
 class PersonsDataset(Dataset):
@@ -43,3 +43,18 @@ class PersonsClassification(PersonsDataset):
         arg = F.one_hot(torch.tensor(chosen_feature) - 1, self.num_features).type(torch.FloatTensor)
 
         return img, task, arg, features[chosen_feature]
+
+
+class PersonsClassificationOccurrence(PersonsDataset):
+    def __getitem__(self, item):
+        path_stub = self.path_stubs[item]
+        img = self.transform(Image.open(f"{path_stub}img.jpg"))[0].unsqueeze(0)
+        with open(f"{path_stub}raw.pkl", 'rb') as f:
+            namespace = pickle.load(f)
+            features = namespace.person_features
+
+        chosen_feature = random.randint(1, self.num_features)
+        task = F.one_hot(torch.tensor(features[0]), self.num_persons).type(torch.FloatTensor)
+        arg = F.one_hot(torch.tensor(chosen_feature) - 1, self.num_features).type(torch.FloatTensor)
+
+        return img, task, arg, features[chosen_feature], torch.Tensor(namespace.label_existence)
