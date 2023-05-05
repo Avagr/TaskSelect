@@ -1,7 +1,23 @@
-class BasicUnpack:
-    def __init__(self, device, criterion):
+import abc
+
+import torch
+
+
+class Unpack(abc.ABC):
+    main_key: str
+
+    def __call__(self, data_obj, model) -> (torch.Tensor, dict[str, torch.Tensor]):
+        pass
+
+    def evaluate(self, data_obj, model) -> dict[str, torch.Tensor]:
+        pass
+
+
+class BasicUnpack(Unpack):
+    def __init__(self, device, criterion, accuracy_metric):
         self.device = device
         self.criterion = criterion
+        self.accuracy_metric = accuracy_metric
         self.main_key = "loss"
 
     def __call__(self, data_obj, model):
@@ -11,8 +27,16 @@ class BasicUnpack:
         loss = self.criterion(prediction, res)
         return loss, {"loss": loss}
 
+    def evaluate(self, data_obj, model):
+        pic, task, arg, res = data_obj
+        pic, task, arg, res = pic.to(self.device), task.to(self.device), arg.to(self.device), res.to(self.device)
+        prediction = model(pic, task, arg)
+        loss = self.criterion(prediction, res)
+        acc = self.accuracy_metric(prediction, res)
+        return {"loss": loss, "acc": acc}
 
-class TwoLossUnpack:
+
+class TwoLossUnpack(Unpack):
     def __init__(self, device, criterion1, criterion2, fraction: float, acc1, acc2, task_names=None, main_key=None):
         if task_names is None:
             task_names = ["first", "second"]
@@ -51,7 +75,6 @@ class TwoLossUnpack:
         loss2 = self.criterion2(prediction2, res2)
         accuracy1 = self.acc1(prediction1, res1)
         accuracy2 = self.acc2(prediction2, res2)
-
         return {
             f"{self.task_names[0]}_loss": loss1,
             f"{self.task_names[1]}_loss": loss2,

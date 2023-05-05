@@ -6,3 +6,4 @@ mix_layer: q
 use_self_attention: true
 patch_size: 16
 sinusoidal: false
+aux_head_size: null

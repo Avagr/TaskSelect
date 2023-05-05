@@ -51,10 +51,6 @@ def run(cfg: DictConfig):
 
     wandb.init(project="BU-TD Benchmark", entity="avagr", name=cfg.name, group=cfg.task.name,
                config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True))
-    wandb.define_metric("val_loss", summary="min")
-    wandb.define_metric("test_loss", summary="min")
-    wandb.define_metric("val_acc", summary="max")
-    wandb.define_metric("test_acc", summary="max")
     wandb.watch(model)
 
     train(model, train_loader, val_loader, test_loader, optimizer, wrapper, n_epochs=cfg.num_epochs, device=cfg.device,
@@ -147,12 +143,10 @@ def parse_task(cfg):
     match cfg.task.name:
         case "EMNIST-6":
             loss = nn.CrossEntropyLoss()
-            acc_metric = occurence_accuracy
-            acc_args = None
             transform = transforms.Compose([
-                # transforms.Resize((224, 224)),
+                transforms.Resize((224, 224)),
                 transforms.ToTensor()])
-            wrapper = BasicUnpack(cfg.device, loss)
+            wrapper = BasicUnpack(cfg.device, loss, occurence_accuracy)
             train_data = Emnist6LeftRight(os.path.join(cfg.task.root_path, "train"), cfg.task.num_classes, transform,
                                           cfg.task.dataset_size)
             val_data = Emnist6LeftRight(os.path.join(cfg.task.root_path, "val"), cfg.task.num_classes, transform)
@@ -160,14 +154,12 @@ def parse_task(cfg):
 
         case "EMNIST-24":
             loss = nn.CrossEntropyLoss()
-            acc_metric = occurence_accuracy
-            acc_args = None
             transform = transforms.Compose([
                 # transforms.Resize((224, 224)), todo
                 transforms.ToTensor(),
                 # transforms.Normalize(mean=(cfg.task.mean,), std=(cfg.task.std,))
             ])
-            wrapper = BasicUnpack(cfg.device, loss)
+            wrapper = BasicUnpack(cfg.device, loss, occurence_accuracy)
             train_data = Emnist24Directions(os.path.join(cfg.task.root_path, "train"), cfg.task.num_classes, transform,
                                             cfg.task.dataset_size)
             val_data = Emnist24Directions(os.path.join(cfg.task.root_path, "val"), cfg.task.num_classes, transform)
@@ -175,8 +167,7 @@ def parse_task(cfg):
 
         case "EMNIST-24-Classification":
             loss = nn.BCEWithLogitsLoss()
-            acc_metric = TopKAccuracy(k=24)
-            wrapper = BasicUnpack(cfg.device, loss)
+            wrapper = BasicUnpack(cfg.device, loss, TopKAccuracy(k=24))
             transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor(),
                                             transforms.Normalize(mean=(cfg.task.mean,), std=(cfg.task.std,))])
             train_data = EmnistExistence(os.path.join(cfg.task.root_path, "train"), cfg.task.num_classes, transform,
@@ -188,9 +179,7 @@ def parse_task(cfg):
 
         case "EMNIST-24-Location":
             loss = nn.CrossEntropyLoss()
-            acc_metric = occurence_accuracy
-            acc_args = None
-            wrapper = BasicUnpack(cfg.device, loss)
+            wrapper = BasicUnpack(cfg.device, loss, occurence_accuracy)
             transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor(),
                                             transforms.Normalize(mean=(cfg.task.mean,), std=(cfg.task.std,))])
             train_data = EmnistLocation(os.path.join(cfg.task.root_path, "train"), cfg.task.num_classes, transform,
@@ -204,7 +193,7 @@ def parse_task(cfg):
             loss = nn.CrossEntropyLoss()
             transform = transforms.Compose([transforms.Resize((224, 224)), transforms.ToTensor()])
             if not cfg.task.occurrence_loss:
-                wrapper = BasicUnpack(cfg.device, loss)
+                wrapper = BasicUnpack(cfg.device, loss, occurence_accuracy)
                 train_data = PersonsClassification(os.path.join(cfg.task.root_path, "train"), cfg.task.num_tasks,
                                                    cfg.task.num_args, transform, size_limit=cfg.task.dataset_size)
                 val_data = PersonsClassification(os.path.join(cfg.task.root_path, "val"), cfg.task.num_tasks,

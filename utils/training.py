@@ -11,6 +11,8 @@ from torch.cuda.amp import GradScaler
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from tqdm.auto import tqdm
 
+from utils.unpacking import Unpack
+
 
 def set_random_seed(seed):
     torch.backends.cudnn.deterministic = True
@@ -105,9 +107,9 @@ def predict(model, val_dataloader, model_wrapper, verbose=False) -> dict:
     return {k: np.mean(v).item() for k, v in metrics.items()}
 
 
-def train(model, train_dataloader, val_dataloader, test_dataloader, optimizer: torch.optim.Optimizer, model_wrapper,
-          device, n_epochs, scheduler=None, verbose=False, save_dir: Path = None, save_best=False,
-          model_name: str = None, show_tqdm=False, use_scaler=False):
+def train(model, train_dataloader, val_dataloader, test_dataloader, optimizer: torch.optim.Optimizer,
+          model_wrapper: Unpack, device, n_epochs, scheduler=None, verbose=False, save_dir: Path = None,
+          save_best=False, model_name: str = None, show_tqdm=False, use_scaler=False):
     """
     Train the model
     :param model: model to train
@@ -166,7 +168,7 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, optimizer: t
             test_string = "/".join([f"{k}: {v:.4f}" for k, v in test_metrics.items()])
             print(
                 f"[{timestamp()}] Epoch {epoch + 1}:\n\tTrain metrics: {train_string}\n"
-                f"\tVal metrics: {val_string}\n\tTest metrics: {test_string}")
+                f"\tVal metrics: {val_string}\n\tTest metrics: {test_string}\n")
 
         if scheduler:
             if isinstance(scheduler, ReduceLROnPlateau):

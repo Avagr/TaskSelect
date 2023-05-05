@@ -1,11 +1,11 @@
 name: enc-dec
 encoder_hidden_size: 120
 encoder_intermediate_size: 120
-num_encoder_layers: 4
+num_encoder_layers: 2
 decoder_hidden_size: 120
 decoder_intermediate_size: 120
 num_decoder_layers: 4
 use_butd: false
 patch_size: 16
 sinusoidal: false
-aux_head_size: null
+aux_head_size: 6
