@@ -16,18 +16,20 @@ def create_sinusoidal_embeddings(n_pos, dim, out):
 
 
 class TaskEmbeddings(nn.Module):
-    def __init__(self, patch_embeddings: nn.Module, hidden_size: int, num_tasks=1, use_sinusoidal=False):
+    def __init__(self, patch_embeddings: nn.Module, hidden_size: int, num_tasks=1, use_sinusoidal=False,
+                 num_cls_tokens=1):
         super().__init__()
         self.patch_embeddings = patch_embeddings
         num_patches = self.patch_embeddings.num_patches
-        self.cls_token = nn.Parameter(torch.randn(1, 1, hidden_size))
+        self.cls_token = nn.Parameter(torch.randn(1, num_cls_tokens, hidden_size))
         self.use_sinusoidal = use_sinusoidal
+        self.num_tokens = num_cls_tokens + num_patches + 2 * num_tasks
         if self.use_sinusoidal:
-            self.position_embeddings = nn.Embedding(1 + num_patches + 2 * num_tasks, hidden_size)
-            create_sinusoidal_embeddings(1 + num_patches + 2 * num_tasks, hidden_size, self.position_embeddings.weight)
-            self.register_buffer("pos_indexes", torch.arange(0, 1 + num_patches + 2 * num_tasks).expand((1, -1)))
+            self.position_embeddings = nn.Embedding(self.num_tokens, hidden_size)
+            create_sinusoidal_embeddings(self.num_tokens, hidden_size, self.position_embeddings.weight)
+            self.register_buffer("pos_indexes", torch.arange(0, self.num_tokens).expand((1, -1)))
         else:
-            self.position_embeddings = nn.Parameter(torch.zeros(1, 1 + num_patches + 2 * num_tasks, hidden_size))
+            self.position_embeddings = nn.Parameter(torch.zeros(1, self.num_tokens, hidden_size))
 
     def forward(self, pixel_values, task_tokens: list[torch.Tensor], argument_tokens: list[torch.Tensor]):
         embeddings = self.patch_embeddings(pixel_values)

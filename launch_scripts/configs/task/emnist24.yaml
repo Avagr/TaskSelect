@@ -1,11 +1,14 @@
 name: EMNIST-24
-image_h: 112
+image_h: 224
 image_w: 224
 num_channels: 1
 num_tasks: 4
 num_args: 47
 num_classes: 47
+num_aux_classes: 47
 root_path: /home/agroskin/data/datasets/emnist-24
 dataset_size: null
 mean: 0.1174
 std: 0.2020
+occurrence_loss: true
+loss_fraction: 0.5

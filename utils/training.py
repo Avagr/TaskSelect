@@ -35,6 +35,10 @@ def occurence_accuracy(pred, correct):
     return torch.argmax(pred, dim=1) == correct
 
 
+def binary_accuracy(pred, correct):
+    return (pred >= 0.5) == correct
+
+
 class TopKAccuracy:
     def __init__(self, k):
         self.k = k

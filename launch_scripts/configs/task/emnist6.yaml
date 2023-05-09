@@ -7,3 +7,6 @@ num_args: 47
 num_classes: 47
 root_path: /home/agroskin/data/datasets/emnist-6
 dataset_size: 100000
+occurrence_loss: false
+num_aux_classes: 47
+loss_fraction: 0.5

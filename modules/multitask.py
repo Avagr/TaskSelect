@@ -13,22 +13,30 @@ class EncDecBUTD(nn.Module):
         super().__init__()
         self.use_butd = use_butd
         self.num_tasks = num_tasks
-        self.encoder = ViTModel(enc_config, add_pooling_layer=False)
+
+        encoder_base = ViTModel(enc_config, add_pooling_layer=False)
+        self.encoder = encoder_base.encoder
+        self.embeddings = TaskEmbeddings(encoder_base.get_input_embeddings(), enc_config.hidden_size, num_tasks=0,
+                                         use_sinusoidal=use_sinusoidal)
+
         self.decoder_blocks = nn.ModuleList(
             [TaskDecoderBlock(enc_config=enc_config, dec_config=dec_config) for _ in
              range(dec_config.num_hidden_layers)])
-        self.task_embeddings = nn.Linear(in_features=num_tasks, out_features=dec_config.hidden_size)
-        self.argument_embeddings = nn.Linear(in_features=num_args, out_features=dec_config.hidden_size)
-        self.final_layernorm = nn.LayerNorm(dec_config.hidden_size, eps=dec_config.layer_norm_eps)
-        self.task_position_embeddings = nn.Parameter(torch.zeros(1, 2, dec_config.hidden_size))
         self.classifier = nn.Linear(in_features=dec_config.hidden_size, out_features=num_classes)
         self.bu_classifier = None
         if aux_head_size is not None:
             self.bu_classifier = nn.Linear(in_features=enc_config.hidden_size, out_features=aux_head_size)
             self.final_encoder_layernorm = nn.LayerNorm(enc_config.hidden_size, eps=enc_config.layer_norm_eps)
 
+        self.task_embeddings = nn.Linear(in_features=num_tasks, out_features=dec_config.hidden_size)
+        self.argument_embeddings = nn.Linear(in_features=num_args, out_features=dec_config.hidden_size)
+        self.task_position_embeddings = nn.Parameter(torch.zeros(1, 2, dec_config.hidden_size))
+
+        self.final_layernorm = nn.LayerNorm(dec_config.hidden_size, eps=dec_config.layer_norm_eps)
+
     def forward(self, img: torch.Tensor, task: torch.FloatTensor, argument: torch.FloatTensor):
-        encoder_hidden_states = self.encoder(img, output_hidden_states=True).hidden_states
+        encoder_hidden_states = self.encoder(self.embeddings(img, [], []),
+                                             output_hidden_states=True).hidden_states
 
         task_tokens = self.task_embeddings(task).unsqueeze(1)
         argument_tokens = self.argument_embeddings(argument).unsqueeze(1)
@@ -51,28 +59,34 @@ class EncDecBUTD(nn.Module):
 class MixingBUTD(nn.Module):
 
     def __init__(self, num_tasks: int, num_args: int, num_classes: int, config: ViTConfig, total_token_size: int,
-                 use_self_attention: bool, mix_with: str, aux_head_size=None):
+                 use_self_attention: bool, mix_with: str, use_sinusoidal=False, aux_head_size=None):
         super().__init__()
+
         self.task_encoder_blocks = nn.ModuleList(
             [TransparentEncoderBlock(config, mix_with) for _ in range(config.num_hidden_layers)])
-        self.image_embeddings = ViTEmbeddings(config)
+        self.image_embeddings = TaskEmbeddings(ViTEmbeddings(config).patch_embeddings, config.hidden_size, num_tasks=0,
+                                               use_sinusoidal=use_sinusoidal,
+                                               num_cls_tokens=1 if aux_head_size is None else 2)
         self.image_encoder_blocks = nn.ModuleList(
             [LateralEncoderBlock(config, mix_with, use_self_attention) for _ in range(config.num_hidden_layers)])
+
         self.task_embeddings = nn.Linear(in_features=num_tasks, out_features=config.hidden_size)
         self.argument_embeddings = nn.Linear(in_features=num_args, out_features=config.hidden_size)
         self.relu = nn.ReLU()
+
         self.stretch_embedding = nn.Linear(in_features=2 * config.hidden_size, out_features=total_token_size)
         self.layernorm = nn.LayerNorm(config.hidden_size, eps=config.layer_norm_eps)
         self.task_position_embeddings = nn.Parameter(
             torch.zeros(1, total_token_size // config.hidden_size, config.hidden_size))
         self.classifier = nn.Linear(in_features=config.hidden_size, out_features=num_classes)
-        self.bu_classifier = None
+
+        self.aux_classifier = None
         if aux_head_size is not None:
-            self.bu_classifier = nn.Linear(in_features=config.hidden_size, out_features=aux_head_size)
+            self.aux_classifier = nn.Linear(in_features=config.hidden_size, out_features=aux_head_size)
 
-    def forward(self, img: torch.Tensor, task: torch.FloatTensor, argument: torch.FloatTensor) -> torch.Tensor:
+    def forward(self, img: torch.Tensor, task: torch.FloatTensor, argument: torch.FloatTensor):
 
-        embedded_image = self.image_embeddings(img)
+        embedded_image = self.image_embeddings(img, [], [])
 
         task_tokens = self.task_embeddings(task)
         argument_tokens = self.argument_embeddings(argument)
@@ -89,20 +103,30 @@ class MixingBUTD(nn.Module):
         for mixing_state, block in zip(mixing_layers[::-1], self.image_encoder_blocks):
             embedded_image = block(embedded_image, mixing_state)
 
-        return self.classifier(self.layernorm(embedded_image[:, 0, :]))
+        normed_res = self.layernorm(embedded_image)
+        if self.aux_classifier is None:
+            return self.classifier(normed_res[:, 0, :])
+        else:
+            return self.classifier(normed_res[:, 0, :]), self.aux_classifier(normed_res[:, 1, :])
 
 
 class EncoderBUTD(nn.Module):
-    def __init__(self, num_tasks: int, num_args: int, num_classes: int, enc_config: ViTConfig, use_sinusoidal=False):
+    def __init__(self, num_tasks: int, num_args: int, num_classes: int, enc_config: ViTConfig, use_sinusoidal=False,
+                 aux_head_size=None):
         super().__init__()
         encoder = ViTForImageClassification(enc_config)
         self.embeddings = TaskEmbeddings(encoder.vit.get_input_embeddings(), enc_config.hidden_size,
-                                         use_sinusoidal=use_sinusoidal)
-        self.layer_norm = encoder.vit.final_encoder_layernorm
+                                         use_sinusoidal=use_sinusoidal,
+                                         num_cls_tokens=1 if aux_head_size is None else 2)
+        self.layer_norm = encoder.vit.layernorm
         self.encoder = encoder.vit.encoder
         self.classifier = nn.Linear(in_features=enc_config.hidden_size, out_features=num_classes)
         self.task_embeddings = nn.Linear(in_features=num_tasks, out_features=enc_config.hidden_size)
         self.argument_embeddings = nn.Linear(in_features=num_args, out_features=enc_config.hidden_size)
+
+        self.aux_classifier = None
+        if aux_head_size is not None:
+            self.aux_classifier = nn.Linear(in_features=enc_config.hidden_size, out_features=aux_head_size)
 
     def forward(self, img: torch.FloatTensor, task: torch.FloatTensor, argument: torch.FloatTensor):
         task_embed = self.task_embeddings(task).unsqueeze(1)
@@ -110,8 +134,10 @@ class EncoderBUTD(nn.Module):
         image_embed = self.embeddings(img, (task_embed,), (argument_embed,))
         encoder_result = self.encoder(image_embed)[0]
         encoder_result = self.layer_norm(encoder_result)
-        logits = self.classifier(encoder_result[:, 0, :])
-        return logits
+        if self.aux_classifier is None:
+            return self.classifier(encoder_result[:, 0, :])
+        else:
+            return self.classifier(encoder_result[:, 0, :]), self.aux_classifier(encoder_result[:, 1, :])
 
 
 class LRBothEncoder(nn.Module):

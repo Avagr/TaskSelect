@@ -15,10 +15,12 @@ from transformers import ViTConfig
 
 sys.path.insert(1, str(Path(__file__).parents[1]))
 
-from datasets.emnist import Emnist6LeftRight, Emnist24Directions, EmnistExistence, EmnistLocation
+from datasets.emnist import Emnist6LeftRight, Emnist24Directions, EmnistExistence, EmnistLocation, \
+    Emnist24DirectionsOccurrence
 from datasets.persons import PersonsClassification, PersonsClassificationOccurrence
+from datasets.cifar import CifarQuery, CifarQueryOccurrence
 from modules.multitask import EncoderBUTD, EncDecBUTD, MixingBUTD
-from utils.training import set_random_seed, train, occurence_accuracy, TopKAccuracy, count_parameters
+from utils.training import set_random_seed, train, occurence_accuracy, TopKAccuracy, count_parameters, binary_accuracy
 from utils.unpacking import BasicUnpack, TwoLossUnpack
 
 
@@ -90,12 +92,15 @@ def create_optimizer(cfg, model):
 def create_model(cfg):
     match cfg.model.name:
         case "encoder":
-            model = EncoderBUTD(cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, enc_config=ViTConfig(
-                hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
-                intermediate_size=cfg.model.intermediate_size, num_channels=cfg.task.num_channels,
-                patch_size=cfg.model.patch_size, num_attention_heads=cfg.model.num_heads,
-                image_size=(cfg.task.image_h, cfg.task.image_w)),
-                                use_sinusoidal=cfg.model.sinusoidal)
+            model = EncoderBUTD(
+                cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, enc_config=ViTConfig(
+                    hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
+                    intermediate_size=cfg.model.intermediate_size, num_channels=cfg.task.num_channels,
+                    patch_size=cfg.model.patch_size, num_attention_heads=cfg.model.num_heads,
+                    image_size=(cfg.task.image_h, cfg.task.image_w)),
+                use_sinusoidal=cfg.model.sinusoidal,
+                aux_head_size=cfg.task.num_aux_classes if cfg.task.occurrence_loss else None
+            )
 
             if cfg.model.initialize_from is not None:
                 state_dict = torch.load(cfg.model.initialize_from)
@@ -106,20 +111,26 @@ def create_model(cfg):
                 model.load_state_dict(state_dict, strict=False)
 
         case "enc-dec":
-            model = EncDecBUTD(cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, enc_config=ViTConfig(
-                hidden_size=cfg.model.encoder_hidden_size, num_hidden_layers=cfg.model.num_encoder_layers,
-                intermediate_size=cfg.model.encoder_intermediate_size, num_channels=cfg.task.num_channels,
-            ), dec_config=ViTConfig(
-                hidden_size=cfg.model.decoder_hidden_size, num_hidden_layers=cfg.model.num_decoder_layers,
-                intermediate_size=cfg.model.decoder_intermediate_size
-            ), use_butd=cfg.model.use_butd, aux_head_size=cfg.model.aux_head_size)
+            model = EncDecBUTD(
+                cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, enc_config=ViTConfig(
+                    hidden_size=cfg.model.encoder_hidden_size, num_hidden_layers=cfg.model.num_encoder_layers,
+                    intermediate_size=cfg.model.encoder_intermediate_size, num_channels=cfg.task.num_channels,
+                ), dec_config=ViTConfig(
+                    hidden_size=cfg.model.decoder_hidden_size, num_hidden_layers=cfg.model.num_decoder_layers,
+                    intermediate_size=cfg.model.decoder_intermediate_size
+                ), use_butd=cfg.model.use_butd,
+                aux_head_size=cfg.task.num_aux_classes if cfg.task.occurrence_loss else None
+            )
 
         case "mixing":
-            model = MixingBUTD(cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, config=ViTConfig(
-                hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
-                num_channels=cfg.task.num_channels, intermediate_size=cfg.model.intermediate_size),
-                               total_token_size=cfg.model.hidden_size * 197,
-                               use_self_attention=cfg.model.use_self_attention, mix_with=cfg.model.mix_layer)
+            model = MixingBUTD(
+                cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, config=ViTConfig(
+                    hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
+                    num_channels=cfg.task.num_channels, intermediate_size=cfg.model.intermediate_size),
+                total_token_size=cfg.model.hidden_size * 197,
+                use_self_attention=cfg.model.use_self_attention, mix_with=cfg.model.mix_layer,
+                aux_head_size=cfg.task.num_aux_classes if cfg.task.occurrence_loss else None
+            )
 
         case "classifier":
             model = EncoderBUTD(cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, enc_config=ViTConfig(
@@ -155,15 +166,26 @@ def parse_task(cfg):
         case "EMNIST-24":
             loss = nn.CrossEntropyLoss()
             transform = transforms.Compose([
-                # transforms.Resize((224, 224)), todo
+                transforms.Resize((224, 224)),
                 transforms.ToTensor(),
-                # transforms.Normalize(mean=(cfg.task.mean,), std=(cfg.task.std,))
+                transforms.Normalize(mean=(cfg.task.mean,), std=(cfg.task.std,))
             ])
-            wrapper = BasicUnpack(cfg.device, loss, occurence_accuracy)
-            train_data = Emnist24Directions(os.path.join(cfg.task.root_path, "train"), cfg.task.num_classes, transform,
-                                            cfg.task.dataset_size)
-            val_data = Emnist24Directions(os.path.join(cfg.task.root_path, "val"), cfg.task.num_classes, transform)
-            test_data = Emnist24Directions(os.path.join(cfg.task.root_path, "test"), cfg.task.num_classes, transform)
+            if not cfg.task.occurrence_loss:
+                wrapper = BasicUnpack(cfg.device, loss, occurence_accuracy)
+                train_data = Emnist24Directions(os.path.join(cfg.task.root_path, "train"), cfg.task.num_classes,
+                                                transform, cfg.task.dataset_size)
+                val_data = Emnist24Directions(os.path.join(cfg.task.root_path, "val"), cfg.task.num_classes, transform)
+                test_data = Emnist24Directions(os.path.join(cfg.task.root_path, "test"), cfg.task.num_classes,
+                                               transform)
+            else:
+                wrapper = TwoLossUnpack(cfg.device, loss, nn.BCEWithLogitsLoss(), cfg.task.loss_fraction,
+                                        occurence_accuracy, TopKAccuracy(k=24), ["feat", "occ"])
+                train_data = Emnist24DirectionsOccurrence(os.path.join(cfg.task.root_path, "train"),
+                                                          cfg.task.num_classes, transform, cfg.task.dataset_size)
+                val_data = Emnist24DirectionsOccurrence(os.path.join(cfg.task.root_path, "val"), cfg.task.num_classes,
+                                                        transform)
+                test_data = Emnist24DirectionsOccurrence(os.path.join(cfg.task.root_path, "test"), cfg.task.num_classes,
+                                                         transform)
 
         case "EMNIST-24-Classification":
             loss = nn.BCEWithLogitsLoss()
@@ -214,6 +236,20 @@ def parse_task(cfg):
                                                             cfg.task.num_tasks,
                                                             cfg.task.num_args, transform,
                                                             size_limit=cfg.task.dataset_size)
+
+        case "CIFAR10":
+            transform = transforms.ToTensor()
+            if not cfg.task.occurrence_loss:
+                wrapper = BasicUnpack(cfg.device, nn.BCEWithLogitsLoss(), binary_accuracy)
+                train_data = CifarQuery(cfg.task.root_path, True, transform)
+                val_data = CifarQuery(cfg.task.root_path, False, transform)
+                test_data = CifarQuery(cfg.task.root_path, False, transform)
+            else:
+                wrapper = TwoLossUnpack(cfg.device, nn.BCEWithLogitsLoss(), nn.CrossEntropyLoss(),
+                                        cfg.task.loss_fraction, binary_accuracy, occurence_accuracy, ["feat", "occ"])
+                train_data = CifarQueryOccurrence(cfg.task.root_path, True, transform)
+                val_data = CifarQueryOccurrence(cfg.task.root_path, False, transform)
+                test_data = CifarQueryOccurrence(cfg.task.root_path, False, transform)
 
         case _:
             raise ValueError(f"Dataset {cfg.task.name} is not supported")

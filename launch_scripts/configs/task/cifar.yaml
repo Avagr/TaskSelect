@@ -1,0 +1,12 @@
+name: CIFAR10
+image_h: 32
+image_w: 32
+num_tasks: 1
+num_channels: 3
+num_args: 10
+num_classes: 1
+root_path: /home/agroskin/data/datasets/cifar
+dataset_size: null
+occurrence_loss: true
+num_aux_classes: 10
+loss_fraction: 0.7

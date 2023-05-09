@@ -26,7 +26,7 @@ use_tf32: true
 disable_wandb: false
 print_epochs: true
 show_tqdm: false
-save_best: false
+save_best: true
 save_directory: /home/agroskin/data/models
 detect_anomalies: false
 

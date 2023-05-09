@@ -5,6 +5,7 @@ num_channels: 1
 num_tasks: 6
 num_args: 6
 num_classes: 8
+num_aux_classes: 6
 root_path: /home/agroskin/data/datasets/persons
 dataset_size: null
 occurrence_loss: true

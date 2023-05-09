@@ -21,18 +21,18 @@ class BasicUnpack(Unpack):
         self.main_key = "loss"
 
     def __call__(self, data_obj, model):
-        pic, task, arg, res = data_obj
-        pic, task, arg, res = pic.to(self.device), task.to(self.device), arg.to(self.device), res.to(self.device)
-        prediction = model(pic, task, arg)
-        loss = self.criterion(prediction, res)
+        pic, task, arg, gt = data_obj
+        pic, task, arg, gt = pic.to(self.device), task.to(self.device), arg.to(self.device), gt.to(self.device)
+        prediction = model(pic, task, arg).squeeze()
+        loss = self.criterion(prediction, gt)
         return loss, {"loss": loss}
 
     def evaluate(self, data_obj, model):
-        pic, task, arg, res = data_obj
-        pic, task, arg, res = pic.to(self.device), task.to(self.device), arg.to(self.device), res.to(self.device)
-        prediction = model(pic, task, arg)
-        loss = self.criterion(prediction, res)
-        acc = self.accuracy_metric(prediction, res)
+        pic, task, arg, gt = data_obj
+        pic, task, arg, gt = pic.to(self.device), task.to(self.device), arg.to(self.device), gt.to(self.device)
+        prediction = model(pic, task, arg).squeeze()
+        loss = self.criterion(prediction, gt)
+        acc = self.accuracy_metric(prediction, gt)
         return {"loss": loss, "acc": acc}
 
 
@@ -55,26 +55,26 @@ class TwoLossUnpack(Unpack):
         self.main_key = main_key
 
     def __call__(self, data_obj, model):
-        pic, task, arg, res1, res2 = data_obj
-        pic, task, arg, res1, res2 = pic.to(self.device), task.to(self.device), arg.to(self.device), res1.to(
-            self.device), res2.to(self.device)
+        pic, task, arg, gt1, gt2 = data_obj
+        pic, task, arg, gt1, gt2 = pic.to(self.device), task.to(self.device), arg.to(self.device), gt1.to(
+            self.device), gt2.to(self.device)
         prediction1, prediction2 = model(pic, task, arg)
-        loss1 = self.criterion1(prediction1, res1)
-        loss2 = self.criterion2(prediction2, res2)
+        loss1 = self.criterion1(prediction1.squeeze(), gt1)
+        loss2 = self.criterion2(prediction2, gt2)
         return self.fraction * loss1 + (1 - self.fraction) * loss2, {
             f"{self.task_names[0]}_loss": loss1,
             f"{self.task_names[1]}_loss": loss2
         }
 
     def evaluate(self, data_obj, model):
-        pic, task, arg, res1, res2 = data_obj
-        pic, task, arg, res1, res2 = pic.to(self.device), task.to(self.device), arg.to(self.device), res1.to(
-            self.device), res2.to(self.device)
+        pic, task, arg, gt1, gt2 = data_obj
+        pic, task, arg, gt1, gt2 = pic.to(self.device), task.to(self.device), arg.to(self.device), gt1.to(
+            self.device), gt2.to(self.device)
         prediction1, prediction2 = model(pic, task, arg)
-        loss1 = self.criterion1(prediction1, res1)
-        loss2 = self.criterion2(prediction2, res2)
-        accuracy1 = self.acc1(prediction1, res1)
-        accuracy2 = self.acc2(prediction2, res2)
+        loss1 = self.criterion1(prediction1.squeeze(), gt1)
+        loss2 = self.criterion2(prediction2, gt2)
+        accuracy1 = self.acc1(prediction1.squeeze(), gt1)
+        accuracy2 = self.acc2(prediction2, gt2)
         return {
             f"{self.task_names[0]}_loss": loss1,
             f"{self.task_names[1]}_loss": loss2,
