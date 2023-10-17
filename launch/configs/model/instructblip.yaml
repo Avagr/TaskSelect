@@ -1,0 +1,4 @@
+name: instructblip
+path: /home/agroskin/data/models/pretrain/instructblip-flan-t5-xl-bf16 # Salesforce/instructblip-flan-t5-xl
+initialize_from: "/home/agroskin/data/models/huggingface"
+processor: Salesforce/instructblip-flan-t5-xl

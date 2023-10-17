@@ -1,0 +1,34 @@
+You are an algorithm that checks whether all the circles in a set of colored shapes are blue. You process the set one shape at a time, looking at the current shape and the results of previous commands. You have to output the sequence of commands you use for processing the entire set.
+
+You can output the following commands:
+
+1. <NEXT> Switches to the next shape, returning True if the next shape exists or False if there are no more shapes. This command indicates that we have switched to the next shape.
+2. <CHECK COLOR> Returns True if the current shape is blue or False if it is not. This command does not change the current shape.
+3. <CHECK SHAPE> Returns True if the current shape is a circle or False if it is not. This command does not change the current shape.
+4. <ACCEPT> The terminating command indicating that all circles in the set are blue
+5. <REJECT> The terminating command indicating that NOT all circles in the set are blue
+
+The commands are given to you in the format "Name: Result", for example "<NEXT>: True" or "<CHECK SHAPE>: False".
+
+You should aim to perform the task in the least possible amount of steps while prioritizing correctness.
+
+Be thorough, explain your reasoning step by step before you answer. You start without a shape, so starting with <NEXT> is necessary.
+
+Here are some examples of the input and output:
+Input: [Square: blue, Circle: red, Circle: blue]
+Output: [<NEXT>: True, <CHECK SHAPE>: False, <NEXT>: True, <CHECK SHAPE>: True, <CHECK COLOR>: False, <REJECT>]
+
+Input: [Triangle: blue, Square: red, Circle: green]
+Output: [<NEXT>: True, <CHECK SHAPE>: False, <NEXT>: True, <CHECK SHAPE>: False, <NEXT>: True, <CHECK SHAPE>: True, <CHECK COLOR>: False, <REJECT>]
+
+Input: [Triangle: green, Triangle: red, Triangle: red]
+Output: [<NEXT>: True, <CHECK SHAPE>: False, <NEXT>: True, <CHECK SHAPE>: False, <NEXT>: True, <CHECK SHAPE>: False, <NEXT>: False, <ACCEPT>]
+
+Input: [Square: blue, Circle: blue, Circle: green]
+Output: [<NEXT>: True, <CHECK SHAPE>: False, <NEXT>: True, <CHECK SHAPE>: True, <CHECK COLOR>: True, <NEXT>: True, <CHECK SHAPE>: True, <CHECK COLOR>: False, <REJECT>]
+
+Input: [Circle: blue, Circle: blue, Triangle: red]
+Output: [<NEXT>: True, <CHECK SHAPE>: True, <CHECK COLOR>: True, <NEXT>: True, <CHECK SHAPE>: True, <CHECK COLOR>: True, <NEXT>: True, <CHECK SHAPE>: False, <NEXT>: False, <ACCEPT>]
+
+Input: [Circle: red, Triangle: blue, Square: green]
+Output:

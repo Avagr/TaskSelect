@@ -114,7 +114,7 @@ class TaskDecoderBlock(nn.Module):
 
         cross_attention_outputs = self.cross_attention(self.decoder_layernorm_cross(decoder_hidden_states),
                                                        self.encoder_layernorm_cross(encoder_hidden_states))
-        # First residual connection TODO layernorm after
+        # First residual connection
         decoder_hidden_states = cross_attention_outputs + decoder_hidden_states
 
         layer_output = self.layernorm_after(decoder_hidden_states)

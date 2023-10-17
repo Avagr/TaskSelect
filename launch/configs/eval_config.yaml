@@ -1,0 +1,27 @@
+defaults:
+    - _self_
+    - task: gqa
+    - model: instructblip
+    - sampling_params: short
+
+name: "${model.name} ${v}"
+wandb_project: "focus"
+v: ???
+seed: 57
+device: cuda:0
+
+num_workers: 6
+pin_memory: true
+batch_size: 64
+
+mixed_precision: false
+use_tf32: false
+
+disable_wandb: false
+show_tqdm: true
+load_from: null
+resume_wandb_id: null
+detect_anomalies: false
+evaluate_fold: "test"
+
+model_size: ???

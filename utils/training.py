@@ -75,10 +75,13 @@ def train_one_epoch(model, train_dataloader, optimizer, model_wrapper, scaler, v
             metrics = {k: [] for k in batch_metrics.keys()}
 
         for k, v in batch_metrics.items():
-            if v.ndim > 0:
-                metrics[k].extend(v.cpu())
+            if isinstance(v, torch.Tensor):
+                if v.ndim > 0:
+                    metrics[k].extend(v.cpu())
+                else:
+                    metrics[k].append(v.item())
             else:
-                metrics[k].append(v.item())
+                metrics[k].append(v)
 
     return {k: np.mean(v).item() for k, v in metrics.items()}
 
@@ -113,7 +116,8 @@ def predict(model, val_dataloader, model_wrapper, verbose=False) -> dict:
 
 def train(model, train_dataloader, val_dataloader, test_dataloader, optimizer: torch.optim.Optimizer,
           model_wrapper: Unpack, device, n_epochs, scheduler=None, verbose=False, save_dir: Path = None,
-          save_best=False, model_name: str = None, show_tqdm=False, use_scaler=False):
+          save_best=False, save_every=2, load_from: Path = None, model_name: str = None, show_tqdm=False,
+          use_scaler=False):
     """
     Train the model
     :param model: model to train
@@ -128,6 +132,8 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, optimizer: t
     :param verbose: whether to print end-of-epoch loss messages
     :param save_dir: directory to save model checkpoints to
     :param save_best: whether to save the best model
+    :param load_from: loads the saved state from a path
+    :param save_every: how often to save
     :param model_name: name of the model for Tensorboard logging and saving
     :param show_tqdm: whether to show tqdm progress bars
     :param use_scaler: whether to train in float16
@@ -149,10 +155,19 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, optimizer: t
         model_save_dir = save_dir / model_name
         model_save_dir.mkdir(parents=True, exist_ok=True)
 
+    start_epoch = 0
+    if load_from is not None:
+        checkpoint = torch.load(load_from)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if scheduler is not None and checkpoint['scheduler_state_dict'] is not None:
+            scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        start_epoch = checkpoint['epoch']
+
     scaler = GradScaler(enabled=use_scaler, growth_interval=200)
 
     print(f"Starting training of {model_name}")
-    for epoch in range(n_epochs):
+    for epoch in range(start_epoch, start_epoch + n_epochs):
 
         train_metrics = train_one_epoch(model, train_dataloader, optimizer, model_wrapper, scaler, show_tqdm)
         val_metrics = predict(model, val_dataloader, model_wrapper, show_tqdm)
@@ -181,11 +196,22 @@ def train(model, train_dataloader, val_dataloader, test_dataloader, optimizer: t
                 scheduler.step()
 
         if save_best:
-            torch.save(model.state_dict(), model_save_dir / f"state.e{epoch}.pt")
+            torch.save({
+                'epoch': epoch,
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict() if scheduler is not None else None
+            }, model_save_dir / f"state.e{epoch}.pt")
             epoch_dict[epoch] = model_save_dir / f"state.e{epoch}.pt"
 
     if save_best:
-        best_epoch = np.argmin(val_loss_history)
+        torch.save({
+            'epoch': n_epochs,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict() if scheduler is not None else None
+        }, save_dir / f"{model_name}_last.pt")
+        best_epoch = np.argmin(val_loss_history[::save_every])
         for epoch, path in epoch_dict.items():
             if epoch == best_epoch:
                 path.rename(save_dir / f"{model_name}_best.pt")

@@ -1,0 +1,8 @@
+name: GQA
+img_dir: /home/agroskin/data/datasets/gqa/images
+train_question_file: null
+val_question_file: null
+test_question_file: /home/agroskin/data/datasets/gqa/questions/testdev_balanced_questions.json
+prompt: "Question: {} Short answer:"
+log_mistakes: true
+mistakes_to_log: 100

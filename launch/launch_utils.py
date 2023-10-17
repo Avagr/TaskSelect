@@ -1,63 +1,21 @@
 import os
-import sys
 from pathlib import Path
 
-import hydra
 import torch
-import wandb
-from omegaconf import DictConfig, OmegaConf
 from torch import nn
-from torch.optim.lr_scheduler import ReduceLROnPlateau, LinearLR, CosineAnnealingWarmRestarts, \
-    SequentialLR
-from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import LinearLR, CosineAnnealingWarmRestarts, ReduceLROnPlateau, SequentialLR
 from torchvision import transforms
-from transformers import ViTConfig
+from transformers import ViTConfig, InstructBlipForConditionalGeneration, AutoProcessor
 
-sys.path.insert(1, str(Path(__file__).parents[1]))
-
-from datasets.emnist import Emnist6LeftRight, Emnist24Directions, EmnistExistence, EmnistLocation, \
-    Emnist24DirectionsOccurrence
-from datasets.persons import PersonsClassification, PersonsClassificationOccurrence
 from datasets.cifar import CifarQuery, CifarQueryOccurrence
+from datasets.emnist import Emnist6LeftRight, Emnist24Directions, Emnist24DirectionsOccurrence, EmnistExistence, \
+    EmnistLocation
+from datasets.persons import PersonsClassification, PersonsClassificationOccurrence
+from datasets.vqa import GQA
+from modules.embeddings import LinearEmbedding, TrickEmbedding
 from modules.multitask import EncoderBUTD, EncDecBUTD, MixingBUTD
-from utils.training import set_random_seed, train, occurence_accuracy, TopKAccuracy, count_parameters, binary_accuracy
-from utils.unpacking import BasicUnpack, TwoLossUnpack
-
-
-@hydra.main(config_path="configs", config_name="config", version_base=None)
-def run(cfg: DictConfig):
-    torch.autograd.set_detect_anomaly(cfg.detect_anomalies, check_nan=True)
-    torch.backends.cuda.matmul.allow_tf32 = cfg.use_tf32
-    torch.backends.cudnn.allow_tf32 = cfg.use_tf32
-
-    set_random_seed(cfg.seed)
-
-    model = create_model(cfg)
-
-    cfg.model_size = count_parameters(model)
-
-    if cfg.disable_wandb:
-        os.environ["WANDB_MODE"] = "disabled"
-        print(OmegaConf.to_yaml(cfg))
-
-    train_data, val_data, test_data, wrapper = parse_task(cfg)
-
-    train_loader = DataLoader(train_data, batch_size=cfg.batch_size, shuffle=True, num_workers=cfg.num_workers,
-                              pin_memory=cfg.pin_memory)
-    val_loader = DataLoader(val_data, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers,
-                            pin_memory=cfg.pin_memory)
-    test_loader = DataLoader(test_data, batch_size=cfg.batch_size, shuffle=False, num_workers=cfg.num_workers,
-                             pin_memory=cfg.pin_memory)
-
-    optimizer, scheduler = create_optimizer(cfg, model)
-
-    wandb.init(project="BU-TD Benchmark", entity="avagr", name=cfg.name, group=cfg.task.name,
-               config=OmegaConf.to_container(cfg, resolve=True, throw_on_missing=True))
-    wandb.watch(model)
-
-    train(model, train_loader, val_loader, test_loader, optimizer, wrapper, n_epochs=cfg.num_epochs, device=cfg.device,
-          scheduler=scheduler, verbose=cfg.print_epochs, save_dir=Path(cfg.save_directory), save_best=cfg.save_best,
-          model_name=cfg.name, show_tqdm=cfg.show_tqdm, use_scaler=cfg.mixed_precision)
+from utils.training import occurence_accuracy, TopKAccuracy, binary_accuracy
+from utils.unpacking import BasicUnpack, TwoLossUnpack, KLUnpack, VQAUnpack, VQACollate
 
 
 def create_optimizer(cfg, model):
@@ -90,17 +48,40 @@ def create_optimizer(cfg, model):
 
 
 def create_model(cfg):
+    if "num_tasks" in cfg.task:
+        match cfg.task_embedding:
+            case "linear":
+                task_embedding = LinearEmbedding(cfg.task.num_tasks, cfg.model.hidden_size)
+            case "trick":
+                task_embedding = TrickEmbedding(cfg.task.num_tasks, cfg.model.hidden_size)
+            case _:
+                raise ValueError(f"Task embedding {cfg.task_embedding} is not supported")
+
+        match cfg.arg_embedding:
+            case "linear":
+                arg_embedding = LinearEmbedding(cfg.task.num_args, cfg.model.hidden_size)
+            case "trick":
+                arg_embedding = TrickEmbedding(cfg.task.num_args, cfg.model.hidden_size)
+            case _:
+                raise ValueError(f"Argument embedding {cfg.arg_embedding} is not supported")
+    else:
+        task_embedding = None
+        arg_embedding = None
+
     match cfg.model.name:
         case "encoder":
-            model = EncoderBUTD(
-                cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, enc_config=ViTConfig(
-                    hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
-                    intermediate_size=cfg.model.intermediate_size, num_channels=cfg.task.num_channels,
-                    patch_size=cfg.model.patch_size, num_attention_heads=cfg.model.num_heads,
-                    image_size=(cfg.task.image_h, cfg.task.image_w)),
-                use_sinusoidal=cfg.model.sinusoidal,
-                aux_head_size=cfg.task.num_aux_classes if cfg.task.occurrence_loss else None
-            )
+            model = EncoderBUTD(cfg.task.num_classes,
+                                enc_config=ViTConfig(hidden_size=cfg.model.hidden_size,
+                                                     num_hidden_layers=cfg.model.num_layers,
+                                                     intermediate_size=cfg.model.intermediate_size,
+                                                     num_channels=cfg.task.num_channels,
+                                                     patch_size=cfg.model.patch_size,
+                                                     num_attention_heads=cfg.model.num_heads,
+                                                     image_size=(cfg.task.image_h, cfg.task.image_w)),
+                                task_embedding=task_embedding,
+                                argument_embedding=arg_embedding,
+                                use_sinusoidal=cfg.model.sinusoidal,
+                                aux_head_size=cfg.task.num_aux_classes if cfg.task.occurrence_loss else None)
 
             if cfg.model.initialize_from is not None:
                 state_dict = torch.load(cfg.model.initialize_from)
@@ -111,39 +92,65 @@ def create_model(cfg):
                 model.load_state_dict(state_dict, strict=False)
 
         case "enc-dec":
-            model = EncDecBUTD(
-                cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, enc_config=ViTConfig(
-                    hidden_size=cfg.model.encoder_hidden_size, num_hidden_layers=cfg.model.num_encoder_layers,
-                    intermediate_size=cfg.model.encoder_intermediate_size, num_channels=cfg.task.num_channels,
-                ), dec_config=ViTConfig(
-                    hidden_size=cfg.model.decoder_hidden_size, num_hidden_layers=cfg.model.num_decoder_layers,
-                    intermediate_size=cfg.model.decoder_intermediate_size
-                ), use_butd=cfg.model.use_butd,
-                aux_head_size=cfg.task.num_aux_classes if cfg.task.occurrence_loss else None
-            )
+            model = EncDecBUTD(cfg.task.num_classes,
+                               enc_config=ViTConfig(
+                                   hidden_size=cfg.model.encoder_hidden_size,
+                                   num_hidden_layers=cfg.model.num_encoder_layers,
+                                   intermediate_size=cfg.model.encoder_intermediate_size,
+                                   num_channels=cfg.task.num_channels,
+                                   patch_size=cfg.model.patch_size, image_size=(cfg.task.image_h, cfg.task.image_w)
+                               ),
+                               dec_config=ViTConfig(
+                                   hidden_size=cfg.model.decoder_hidden_size,
+                                   num_hidden_layers=cfg.model.num_decoder_layers,
+                                   intermediate_size=cfg.model.decoder_intermediate_size
+                               ),
+                               task_embedding=task_embedding,
+                               argument_embedding=arg_embedding,
+                               use_butd=cfg.model.use_butd, use_sinusoidal=cfg.model.sinusoidal,
+                               aux_head_size=cfg.task.num_aux_classes if cfg.task.occurrence_loss else None)
 
         case "mixing":
-            model = MixingBUTD(
-                cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, config=ViTConfig(
-                    hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
-                    num_channels=cfg.task.num_channels, intermediate_size=cfg.model.intermediate_size),
-                total_token_size=cfg.model.hidden_size * 197,
-                use_self_attention=cfg.model.use_self_attention, mix_with=cfg.model.mix_layer,
-                aux_head_size=cfg.task.num_aux_classes if cfg.task.occurrence_loss else None
-            )
+            num_patches = (cfg.task.image_h // cfg.model.patch_size) * (cfg.task.image_h // cfg.model.patch_size)
+            model = MixingBUTD(cfg.task.num_classes,
+                               config=ViTConfig(
+                                   hidden_size=cfg.model.hidden_size,
+                                   num_hidden_layers=cfg.model.num_layers,
+                                   num_channels=cfg.task.num_channels,
+                                   intermediate_size=cfg.model.intermediate_size,
+                                   patch_size=cfg.model.patch_size,
+                                   image_size=(cfg.task.image_h, cfg.task.image_w)),
+                               task_embedding=task_embedding,
+                               argument_embedding=arg_embedding,
+                               total_token_size=cfg.model.hidden_size * (
+                                       num_patches + (2 if cfg.task.occurrence_loss else 1)),
+                               use_self_attention=cfg.model.use_self_attention, mix_with=cfg.model.mix_layer,
+                               aux_head_size=cfg.task.num_aux_classes if cfg.task.occurrence_loss else None,
+                               stretch=cfg.model.stretch_task, use_sinusoidal=cfg.model.sinusoidal)
 
         case "classifier":
-            model = EncoderBUTD(cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, enc_config=ViTConfig(
-                hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
-                intermediate_size=cfg.model.intermediate_size, num_channels=cfg.task.num_channels,
-            ), use_sinusoidal=cfg.model.sinusoidal)
+            model = EncoderBUTD(cfg.task.num_classes,
+                                enc_config=ViTConfig(
+                                    hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
+                                    intermediate_size=cfg.model.intermediate_size, num_channels=cfg.task.num_channels,
+                                ),
+                                task_embedding=task_embedding,
+                                argument_embedding=arg_embedding,
+                                use_sinusoidal=cfg.model.sinusoidal)
 
         case "locator":
-            model = EncoderBUTD(cfg.task.num_tasks, cfg.task.num_args, cfg.task.num_classes, enc_config=ViTConfig(
-                hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
-                intermediate_size=cfg.model.intermediate_size, num_channels=cfg.task.num_channels,
-                patch_size=cfg.model.patch_size),
+            model = EncoderBUTD(cfg.task.num_classes,
+                                enc_config=ViTConfig(
+                                    hidden_size=cfg.model.hidden_size, num_hidden_layers=cfg.model.num_layers,
+                                    intermediate_size=cfg.model.intermediate_size, num_channels=cfg.task.num_channels,
+                                    patch_size=cfg.model.patch_size),
+                                task_embedding=task_embedding,
+                                argument_embedding=arg_embedding,
                                 use_sinusoidal=cfg.model.sinusoidal)
+
+        case "instructblip":
+            model = InstructBlipForConditionalGeneration.from_pretrained(cfg.model.path,
+                                                                         cache_dir=cfg.model.initialize_from)
 
         case _:
             raise ValueError(f"Model {cfg.model.name} is not supported")
@@ -151,6 +158,12 @@ def create_model(cfg):
 
 
 def parse_task(cfg):
+    collate_fn = None
+    processor = None
+
+    if cfg.model.processor is not None:
+        processor = AutoProcessor.from_pretrained(cfg.model.processor)
+
     match cfg.task.name:
         case "EMNIST-6":
             loss = nn.CrossEntropyLoss()
@@ -251,10 +264,27 @@ def parse_task(cfg):
                 val_data = CifarQueryOccurrence(cfg.task.root_path, False, transform)
                 test_data = CifarQueryOccurrence(cfg.task.root_path, False, transform)
 
+        case "GQA":
+            wrapper = VQAUnpack(cfg.device, nn.CrossEntropyLoss(), cfg.sampling_params, processor)
+            collate_fn = VQACollate(processor)
+            if cfg.task.log_mistakes:
+                wrapper.set_logging(True)
+            train_data = None if cfg.task.train_question_file is None else GQA(Path(cfg.task.img_dir),
+                                                                               Path(cfg.task.train_question_file),
+                                                                               cfg.task.prompt)
+            val_data = None if cfg.task.val_question_file is None else GQA(Path(cfg.task.img_dir),
+                                                                           Path(cfg.task.val_question_file),
+                                                                           cfg.task.prompt)
+            test_data = None if cfg.task.test_question_file is None else GQA(Path(cfg.task.img_dir),
+                                                                             Path(cfg.task.test_question_file),
+                                                                             cfg.task.prompt)
+
         case _:
             raise ValueError(f"Dataset {cfg.task.name} is not supported")
-    return train_data, val_data, test_data, wrapper
 
+    if "num_tasks" in cfg.task and (cfg.task_embedding == "trick" or cfg.arg_embedding == "trick"):
+        if isinstance(wrapper, BasicUnpack):
+            wrapper = KLUnpack(cfg.device, wrapper.criterion, wrapper.accuracy_metric, cfg.kld_weight,
+                               cfg.log_embeddings)
 
-if __name__ == '__main__':
-    run()
+    return train_data, val_data, test_data, wrapper, collate_fn

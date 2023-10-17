@@ -1,11 +1,11 @@
 name: EMNIST-6
-image_h: 28
+image_h: 224
 image_w: 224
 num_tasks: 2
 num_channels: 1
 num_args: 47
 num_classes: 47
-root_path: /home/agroskin/data/datasets/emnist-6
+root_path: /home/agroskin/data/datasets/emnist6
 dataset_size: 100000
 occurrence_loss: false
 num_aux_classes: 47

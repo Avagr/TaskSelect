@@ -3,7 +3,8 @@ defaults:
     - task: emnist6
     - model: encoder
 
-name: "${task.name} ${model.name} ${v}"
+name: "${model.name} ${v}"
+wandb_project: "TrickyBusiness"
 v: ???
 seed: 57
 device: cuda:0
@@ -20,14 +21,21 @@ annealing_t0: -1
 scheduler_patience: 20
 num_epochs: 300
 
+task_embedding: linear  # linear, trick
+arg_embedding: linear  # linear, trick
+kld_weight: 0.5
+log_embeddings: true
+
 mixed_precision: false
 use_tf32: true
 
 disable_wandb: false
 print_epochs: true
 show_tqdm: false
-save_best: true
+save_best: false
 save_directory: /home/agroskin/data/models
+load_from: null
+resume_wandb_id: null
 detect_anomalies: false
 
 model_size: ???

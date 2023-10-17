@@ -1,8 +1,9 @@
 name: mixing
-hidden_size: 240
-intermediate_size: 768
+hidden_size: 192
+intermediate_size: 512
 num_layers: 3
 mix_layer: q
+stretch_task: false
 use_self_attention: true
 patch_size: 16
 sinusoidal: true

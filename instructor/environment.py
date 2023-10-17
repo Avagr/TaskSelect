@@ -97,7 +97,7 @@ class FindAllShapesEnv(gym.Env):
                     res[4] = 1
                 else:
                     res[5] = 1
-            # TODO: test if moving next after extract improves performance
+            # test if moving next after extract improves performance
             case self.ACCEPT:
                 self.extracted_shapes.add(self.shapes[self.current])
                 self.current += 1
@@ -131,7 +131,7 @@ class FindAllShapesEnv(gym.Env):
                     return self.state, 5, True, {}
                 iou = len(self.extracted_shapes.intersection(self.correct_shapes)) / len(
                     self.extracted_shapes.union(self.correct_shapes))
-                return self.state, 10 * iou - 5, True, {'iou': iou}
+                return self.state, iou, True, {'iou': iou}
 
             case self.REJECT | self.ACCEPT:
                 if not self.questioned_current:

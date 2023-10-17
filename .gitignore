@@ -1,8 +1,10 @@
 *.png
 *.jpg
 *.pkl
-/launch_scripts/instructor/tb_test/
-/test.ipynb
-/launch_scripts/outputs/
+/launch/instructor/tb_test/
+*.ipynb
+/launch/outputs/
 */.ipynb_checkpoints/
-/launch_scripts/instructor/.ipynb_checkpoints/
+/launch/instructor/.ipynb_checkpoints/
+/vislang/
+/vislang_testing.ipynb
