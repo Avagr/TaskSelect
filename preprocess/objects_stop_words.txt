@@ -1,0 +1,1 @@
+color, kind, type, it, top, right, left, bottom, front, back, side, picture, item, what, who, which, that, gender, material
